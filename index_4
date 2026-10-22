@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Norte Maps v4</title>
+
+  <!-- Libreria A-Frame: convierte las etiquetas <a-...> en objetos 3D -->
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+
+  <!-- DATOS DEL MAPA: puntos, calles y territorio de Norte Maps, tal como vienen de Google My Maps
+       (longitud y latitud en grados). Quedan guardados en window.NORTE_MAPS.
+       Este archivo debe cargarse ANTES de los componentes, que lo usan. -->
+  <script src="activos/norte-maps-datos.js"></script>
+
+  <style>
+    /* Cartelito de ayuda abajo a la izquierda (es HTML normal, no esta dentro de la escena 3D) */
+    #hud {
+      position: fixed; left: 12px; bottom: 12px; z-index: 10; max-width: 340px;
+      font: 13px/1.4 system-ui, sans-serif; color: #222;
+      background: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px;
+      pointer-events: none;
+    }
+  </style>
+
+  <script>
+    // ============================================================
+    // COMPONENTES PROPIOS
+    // Un componente es un comportamiento que se le pega a un objeto
+    // escribiendo su nombre como atributo (ej: radio-audio="...").
+    // ============================================================
+
+    // ---------- 1) radio-audio (igual que en la version anterior) ----------
+    // Al hacer clic sobre la radio reproduce / pausa el audio y enciende
+    // o apaga su luz roja (la pieza del modelo llamada "indicador").
+    AFRAME.registerComponent('radio-audio', {
+      schema: { src: { type: 'selector' } },
+      init: function () {
+        var audio = this.data.src;
+        var el = this.el;
+        var indicador = null;
+
+        function luz(encendida) {
+          if (!indicador) return;
+          indicador.material.emissive.setHex(encendida ? 0xff3b1f : 0x000000);
+          indicador.material.emissiveIntensity = encendida ? 2 : 0;
+        }
+
+        el.addEventListener('model-loaded', function () {
+          el.object3D.traverse(function (o) {
+            if (o.name === 'indicador' && o.material) {
+              o.material = o.material.clone();
+              indicador = o;
+            }
+          });
+          luz(!audio.paused);
+        });
+
+        el.addEventListener('click', function () {
+          if (audio.paused) {
+            audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
+          } else {
+            audio.pause();
+          }
+        });
+
+        audio.addEventListener('play', function () { luz(true); });
+        audio.addEventListener('pause', function () { luz(false); });
+
+        el.addEventListener('mouseenter', function () { el.sceneEl.canvas.style.cursor = 'pointer'; });
+        el.addEventListener('mouseleave', function () { el.sceneEl.canvas.style.cursor = ''; });
+      }
+    });
+
+    // ---------- 2) mirar-camara ----------
+    // Hace que un objeto (aqui, los carteles con nombre) gire siempre hacia quien mira,
+    // pero solo de izquierda a derecha: el cartel queda vertical, no se inclina.
+    AFRAME.registerComponent('mirar-camara', {
+      init: function () {
+        this.destino = new THREE.Vector3();   // donde esta la camara
+      },
+      tick: function () {
+        var camara = this.el.sceneEl.camera;
+        if (!camara) return;
+        var obj = this.el.object3D;
+        camara.getWorldPosition(this.destino);
+        this.destino.y = obj.position.y;      // misma altura que el cartel -> no se inclina
+        obj.lookAt(this.destino);
+      }
+    });
+
+    // ---------- 3) correr ----------
+    // Mantener Shift = caminar mas rapido (util para recorrer el mapa a escala real).
+    // Funciona cambiando la "aceleracion" del componente wasd-controls.
+    AFRAME.registerComponent('correr', {
+      schema: { normal: { default: 15 }, rapido: { default: 60 } },
+      init: function () {
+        var el = this.el, d = this.data;
+        function poner(valor) { el.setAttribute('wasd-controls', 'acceleration', valor); }
+        window.addEventListener('keydown', function (e) { if (e.key === 'Shift') poner(d.rapido); });
+        window.addEventListener('keyup', function (e) { if (e.key === 'Shift') poner(d.normal); });
+        window.addEventListener('blur', function () { poner(d.normal); }); // si se pierde el foco, vuelve a normal
+      }
+    });
+
+    // ---------- 4) norte-maps ----------
+    // Construye el barrio a partir de los datos de window.NORTE_MAPS:
+    //   - el suelo y el "territorio urbano" (el poligono del mapa)
+    //   - las calles, como cintas sobre el suelo, con su nombre
+    //   - los 12 puntos del mapa (gimnasio, radio, humedal...) con su cartel
+    //   - los puntos de reciclaje (cilindros chicos de colores)
+    // El gimnasio queda en el centro del mundo (0, 0, 0).
+    //
+    // LA ESCALA: "escala: 0.2" significa 1 metro real = 0.2 metros en la escena (1:5).
+    // Para ver el barrio a tamaño real hay dos formas:
+    //   a) en la direccion del navegador agregar  ?escala=1   (ej: http://127.0.0.1:5500/index_v4.html?escala=1)
+    //   b) en el HTML de mas abajo cambiar  norte-maps="escala: 0.2"  por  norte-maps="escala: 1"
+    // Si hay ?escala= en la direccion, manda por sobre el numero escrito en el HTML.
+    AFRAME.registerComponent('norte-maps', {
+      schema: { escala: { default: 0.2 } },
+
+      init: function () {
+        var el = this.el;
+        var escena = el.sceneEl;
+        var datos = window.NORTE_MAPS;
+        if (!datos) { console.error('Falta activos/norte-maps-datos.js'); return; }
+
+        // --- 1. Escala (del HTML, o de ?escala= en la direccion) ---
+        var param = parseFloat(new URLSearchParams(location.search).get('escala'));
+        var escala = param > 0 ? param : this.data.escala;
+        this.escala = escala;
+
+        // --- 2. De grados (lon, lat) a metros de la escena ---
+        // Un grado de latitud mide ~111 km (radio de la Tierra * pi/180).
+        // Un grado de longitud mide menos cuanto mas lejos del ecuador: se multiplica por cos(latitud).
+        // El origen (0,0) es el gimnasio. Este = +x. Norte = -z (en A-Frame "adelante" es -z).
+        var RADIO_TIERRA = 6371000, RAD = Math.PI / 180;
+        var origen = datos.origen, cosLat = Math.cos(origen.lat * RAD);
+        function aEscena(lon, lat) {
+          return new THREE.Vector2(
+            (lon - origen.lon) * RAD * RADIO_TIERRA * cosLat * escala,   // x
+            -(lat - origen.lat) * RAD * RADIO_TIERRA * escala             // z
+          );
+        }
+        this.aEscena = aEscena;
+
+        // --- 3. Ayudas ---
+        // Crea un objeto de A-Frame (<a-...>) desde JavaScript y lo mete dentro de "padre".
+        function crear(etiqueta, atributos, padre) {
+          var e = document.createElement(etiqueta);
+          for (var k in atributos) e.setAttribute(k, atributos[k]);
+          (padre || el).appendChild(e);
+          return e;
+        }
+        // Crea una malla 3D (geometria + material). "orden" decide quien se dibuja primero:
+        // asi el suelo queda debajo del territorio y este debajo de las calles, sin parpadeos.
+        function malla(geometria, color, orden) {
+          var m = new THREE.Mesh(geometria, new THREE.MeshStandardMaterial({
+            color: color, roughness: 1, side: THREE.DoubleSide, depthWrite: false
+          }));
+          m.renderOrder = orden;
+          return m;
+        }
+
+        // --- 4. Niebla: mas cerca cuanto mas chico el mapa (con 0.2 es igual a la version anterior) ---
+        escena.setAttribute('fog', 'type: linear; color: #ECECEC; near: ' + (125 * escala) + '; far: ' + (475 * escala));
+
+        // --- 5. Suelo (un plano enorme) ---
+        var lado = Math.max(500, 2600 * escala);
+        var suelo = new THREE.PlaneGeometry(lado, lado);
+        suelo.rotateX(-Math.PI / 2);                  // el plano nace vertical: se acuesta
+        el.setObject3D('suelo', malla(suelo, '#E3DED0', -3));
+
+        // --- 6. Territorio urbano: el poligono del mapa, de un verde claro ---
+        // (se le quita el ultimo vertice porque repite el primero)
+        var contorno = datos.territorio.slice(0, -1).map(function (p) {
+          var q = aEscena(p[0], p[1]);
+          return new THREE.Vector2(q.x, -q.y);        // ShapeGeometry usa (x, y); al acostarla, y pasa a ser -z
+        });
+        var territorio = new THREE.ShapeGeometry(new THREE.Shape(contorno));
+        territorio.rotateX(-Math.PI / 2);
+        el.setObject3D('territorio', malla(territorio, '#C2D9BC', -2));
+
+        // --- 7. Calles: cada calle es una "cinta" (una tira) que sigue sus vertices ---
+        var anchoCalle = Math.max(3, 9 * escala);     // ancho en la escena: 3 con escala 0.2, 9 a escala real
+        var pos = [], idx = [];                       // todas las calles se juntan en UNA sola malla (mas liviano)
+
+        function agregarCinta(puntos, ancho) {
+          var base = pos.length / 3;
+          var n = puntos.length;
+          for (var i = 0; i < n; i++) {
+            // direccion del tramo anterior y del siguiente en este vertice
+            var dPrev = i > 0 ? puntos[i].clone().sub(puntos[i - 1]).normalize() : null;
+            var dSig = i < n - 1 ? puntos[i + 1].clone().sub(puntos[i]).normalize() : null;
+            var dir = (dPrev && dSig) ? dPrev.clone().add(dSig).normalize() : (dPrev || dSig);
+            var normal = new THREE.Vector2(-dir.y, dir.x);           // perpendicular a la direccion
+            // en las esquinas se alarga un poco el borde para que la cinta no se "pince"
+            var largo = ancho / 2;
+            if (dPrev && dSig) {
+              var nSeg = new THREE.Vector2(-dPrev.y, dPrev.x);
+              largo = (ancho / 2) / Math.max(0.5, normal.dot(nSeg));
+            }
+            pos.push(puntos[i].x + normal.x * largo, 0, puntos[i].y + normal.y * largo);   // borde izquierdo
+            pos.push(puntos[i].x - normal.x * largo, 0, puntos[i].y - normal.y * largo);   // borde derecho
+          }
+          for (var j = 0; j < n - 1; j++) {                          // cada tramo = 2 triangulos
+            var a = base + j * 2;
+            idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+          }
+        }
+
+        var etiquetasCalles = [];
+        datos.calles.forEach(function (calle) {
+          var puntos = calle.pts.map(function (p) { return aEscena(p[0], p[1]); });
+          var esAvenida = calle.nombre.indexOf('Avenida') === 0;
+          agregarCinta(puntos, esAvenida ? anchoCalle * 1.8 : anchoCalle);
+          // buscamos el tramo mas largo para poner ahi el nombre
+          var mejor = 0, mejorLargo = 0;
+          for (var i = 0; i < puntos.length - 1; i++) {
+            var L = puntos[i].distanceTo(puntos[i + 1]);
+            if (L > mejorLargo) { mejorLargo = L; mejor = i; }
+          }
+          etiquetasCalles.push({ nombre: calle.nombre, a: puntos[mejor], b: puntos[mejor + 1], largo: mejorLargo });
+        });
+
+        var geoCalles = new THREE.BufferGeometry();
+        geoCalles.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geoCalles.setIndex(idx);
+        geoCalles.computeVertexNormals();
+        el.setObject3D('calles', malla(geoCalles, '#7C7C78', -1));
+
+        // --- 8. Nombres de las calles: texto acostado sobre el suelo, siguiendo la calle ---
+        etiquetasCalles.forEach(function (c) {
+          var dx = c.b.x - c.a.x, dz = c.b.y - c.a.y;
+          // angulo de la calle visto desde arriba (al acostar el texto, su "arriba" apunta a -z)
+          var angulo = Math.atan2(-dz, dx) * 180 / Math.PI;
+          if (angulo > 90) angulo -= 180;             // para que el texto no quede "de cabeza"
+          if (angulo < -90) angulo += 180;
+          var ancho = Math.min(anchoCalle * 2.7, c.largo * 0.9);
+          crear('a-entity', {
+            text: 'value: ' + c.nombre + '; align: center; anchor: center; color: #F5F5F5; width: ' + ancho,
+            position: ((c.a.x + c.b.x) / 2) + ' 0.05 ' + ((c.a.y + c.b.y) / 2),
+            rotation: '-90 0 ' + angulo
+          });
+        });
+
+        // --- 9. Los 12 puntos del mapa ---
+        var camaraInicio = null;                       // donde parte el visitante (se calcula abajo)
+        var radioPos = null;
+        datos.puntos.forEach(function (p) {
+          var q = aEscena(p.lon, p.lat);
+          var marca = crear('a-entity', { position: q.x + ' 0 ' + q.y });
+          var altoCartel = 3.4;
+
+          if (p.tipo === 'gimnasio') {
+            // el gimnasio: una caja de ~30 x 20 m reales (aproximada), solo como volumen de referencia
+            var ancho = 30 * escala, fondo = 20 * escala;
+            crear('a-box', { width: ancho, height: 6, depth: fondo, position: '0 3 0', color: '#C8553D' }, marca);
+            altoCartel = 7.2;
+            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + fondo / 2 + 3);
+          } else if (p.tipo === 'radio') {
+            // la radio 3D sobre un pedestal; hace clic para escuchar
+            radioPos = q;
+            crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marca);
+            marca.radio = crear('a-entity', {
+              class: 'clickable', 'gltf-model': '#radio', 'radio-audio': 'src: #audio-relato',
+              position: '0 1 0', scale: '2 2 2'
+            }, marca);
+            altoCartel = 2.6;
+          } else {
+            // un punto cualquiera: palo + esfera de color
+            // (segments-radial / segments-width: cuantos lados tiene la figura; menos lados = menos triangulos)
+            crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
+            crear('a-sphere', {
+              radius: 0.28, position: '0 2.5 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
+              material: 'color: #E8743B; emissive: #E8743B; emissiveIntensity: 0.4'
+            }, marca);
+          }
+
+          // cartel con el nombre (siempre mirando al visitante)
+          var texto = p.tipo === 'radio' ? p.nombre + ' (clic para escuchar)' : p.nombre;
+          crear('a-entity', {
+            text: 'value: ' + texto + '; align: center; anchor: center; color: #222222; width: 8',
+            position: '0 ' + altoCartel + ' 0',
+            'mirar-camara': ''
+          }, marca);
+        });
+
+        // --- 10. Puntos de reciclaje: cilindros chicos de color ---
+        var colores = { naturaleza: '#4E9F5B', basural: '#7A7A7A', rocura: '#3B8FA8' };
+        datos.reciclaje.forEach(function (r) {
+          var q = aEscena(r.lon, r.lat);
+          crear('a-cylinder', {
+            radius: 0.25, height: 0.5, position: q.x + ' 0.25 ' + q.y, color: colores[r.tipo] || '#999999', 'segments-radial': 10, 'segments-height': 1
+          });
+        });
+
+        // --- 11. Camara: empieza junto al gimnasio, mirando hacia la radio ---
+        var self = this;
+        function ubicarVisitante() {
+          var cam = document.querySelector('[camera]');
+          if (!cam || !camaraInicio) return;
+          cam.object3D.position.copy(camaraInicio);
+          if (radioPos) {
+            var dx = radioPos.x - camaraInicio.x, dz = radioPos.y - camaraInicio.z;
+            var yaw = Math.atan2(-dx, -dz);            // giro necesario para que "adelante" apunte a la radio
+            cam.components['look-controls'].yawObject.rotation.y = yaw;
+            // y la radio se gira para quedar de frente al visitante
+            var giroRadio = Math.atan2(camaraInicio.x - radioPos.x, camaraInicio.z - radioPos.y) * 180 / Math.PI;
+            var r = document.querySelector('[radio-audio]');
+            if (r) r.setAttribute('rotation', '0 ' + giroRadio + ' 0');
+          }
+          self.camara = cam;
+        }
+        if (escena.hasLoaded) ubicarVisitante(); else escena.addEventListener('loaded', ubicarVisitante);
+
+        // --- 12. Cartelito de ayuda ---
+        this.hud = document.getElementById('hud');
+        this.contador = 0;
+        this.escribirHud(null);
+      },
+
+      // Texto del cartelito: escala, distancia real al gimnasio y teclas.
+      escribirHud: function (distanciaEscena) {
+        if (!this.hud) return;
+        var esc = this.escala;
+        var linea1 = 'Norte Maps · escala 1:' + (1 / esc).toFixed(esc >= 0.95 ? 0 : 1).replace(/\.0$/, '') + ' (1 m real = ' + esc + ' m aqui)';
+        var linea2 = distanciaEscena === null ? '' : '<br>Estas a ' + Math.round(distanciaEscena / esc) + ' m reales del gimnasio';
+        this.hud.innerHTML = linea1 + linea2 +
+          '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar' +
+          '<br>Otra escala: agregar <b>?escala=1</b> a la direccion';
+      },
+
+      // Cada ~15 cuadros actualizamos la distancia al gimnasio (no hace falta hacerlo en cada cuadro).
+      tick: function () {
+        if (!this.camara) return;
+        this.contador++;
+        if (this.contador % 15) return;
+        var p = this.camara.object3D.position;
+        this.escribirHud(Math.sqrt(p.x * p.x + p.z * p.z));
+      }
+    });
+  </script>
+</head>
+
+<body>
+  <div id="hud"></div>
+
+  <!-- ESCENA
+       stats                            -> panel de rendimiento (fps, triangulos)
+       background                       -> color de fondo (en vez de un cielo, que pesa mas)
+       cursor="rayOrigin: mouse"        -> el mouse es el puntero que activa los objetos
+       raycaster="objects: .clickable"  -> solo reaccionan los objetos con class="clickable"
+       (la niebla la pone el componente norte-maps segun la escala) -->
+  <a-scene stats background="color: #ECECEC" cursor="rayOrigin: mouse" raycaster="objects: .clickable">
+
+    <!-- ARCHIVOS QUE SE CARGAN (modelo 3D de la radio y su audio) -->
+    <a-assets>
+      <a-asset-item id="radio" src="activos/radio.glb"></a-asset-item>
+      <!-- Audio de prueba: reemplazar por el audio de un relato de la Cooperativa -->
+      <audio id="audio-relato" src="activos/audio-prueba.wav" preload="auto" loop></audio>
+    </a-assets>
+
+    <!-- EL BARRIO. Para cambiar la escala: escala: 0.2 (1:5)  ->  escala: 1 (tamaño real) -->
+    <a-entity id="mapa" norte-maps="escala: 0.2"></a-entity>
+
+    <!-- CAMARA: es el "ojo" del visitante. Su posicion inicial la calcula norte-maps (junto al gimnasio).
+         near: 0.1 -> lo mas cercano que se dibuja; mejora la nitidez del suelo a lo lejos.
+         correr    -> con Shift camina mas rapido -->
+    <a-entity camera="fov: 60; near: 0.1" look-controls wasd-controls="acceleration: 15" correr
+              position="0 1.6 5"></a-entity>
+
+    <!-- LUCES -->
+    <a-entity light="type: ambient; intensity: 0.9"></a-entity>
+    <a-entity light="type: directional; intensity: 0.6" position="-1 2 1"></a-entity>
+  </a-scene>
+</body>
+</html>
