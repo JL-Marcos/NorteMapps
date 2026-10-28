@@ -29,22 +29,56 @@
     // escribiendo su nombre como atributo (ej: radio-audio="...").
     // ============================================================
 
-    // ---------- 0) punto-audio ----------
-    // Version generica de la interaccion de audio, para cualquier punto del mapa
-    // que tenga un relato grabado (ver campo "audio" en norte-maps-datos.js).
-    // Al hacer clic en el marcador (palo + esfera) reproduce / pausa su audio.
+    // ---------- 0) utilidades de recoleccion ----------
+    // Cada "cassette" recolectado se guarda en localStorage: persiste entre visitas
+    // en ESTE navegador. No hay servidor ni cuenta de usuario (fuera del alcance del prototipo).
+    var TOTAL_FRAGMENTOS = (window.NORTE_MAPS.puntos || []).filter(function (p) { return p.fragmento; }).length;
+    function estaRecolectado(id) { return localStorage.getItem('norte-maps-recolectado-' + id) === '1'; }
+    function marcarRecolectado(id) {
+      localStorage.setItem('norte-maps-recolectado-' + id, '1');
+      window.dispatchEvent(new CustomEvent('norte-maps:recoleccion'));
+    }
+    function contarRecolectados() {
+      return (window.NORTE_MAPS.puntos || []).filter(function (p) { return p.fragmento && estaRecolectado(p.fragmento); }).length;
+    }
+    function actualizarContador() {
+      var el = document.getElementById('contador-recoleccion');
+      if (el) el.textContent = '🎞️ ' + contarRecolectados() + ' / ' + TOTAL_FRAGMENTOS + ' relatos recolectados';
+    }
+    window.addEventListener('norte-maps:recoleccion', actualizarContador);
+    window.addEventListener('load', actualizarContador);
+
+    // ---------- 1) punto-audio ----------
+    // Mecanica de "recoleccion": cada clic hace crecer el objeto un poco (animacion).
+    // Al llegar al numero de clics definido por punto (p.clics, calculado segun el peso
+    // del audio: un relato mas largo/pesado cuesta mas clics sacarlo), el objeto se
+    // desprende, desaparece del mapa, queda guardado como recolectado y RECIEN AHI
+    // se reproduce el relato completo (la escucha es la recompensa, no algo previo).
     AFRAME.registerComponent('punto-audio', {
-      schema: { src: { type: 'selector' } },
+      schema: { src: { type: 'selector' }, clics: { type: 'number', default: 3 }, id: { type: 'string' } },
       init: function () {
         var audio = this.data.src;
         var el = this.el;
+        var self = this;
+        this.contador = 0;
+
+        if (this.data.id && estaRecolectado(this.data.id)) {
+          el.setAttribute('visible', false);   // ya se recolecto antes: no vuelve a aparecer
+          return;
+        }
         if (!audio) return;
         el.classList.add('clickable');
         el.addEventListener('click', function () {
-          if (audio.paused) {
+          self.contador++;
+          var crecimiento = 1 + self.contador * 0.18;
+          el.setAttribute('animation__crecer', {
+            property: 'scale', to: crecimiento + ' ' + crecimiento + ' ' + crecimiento, dur: 150, easing: 'easeOutBack'
+          });
+          if (self.contador >= self.data.clics) {
+            if (self.data.id) marcarRecolectado(self.data.id);
+            el.setAttribute('visible', false);
+            audio.currentTime = 0;
             audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
-          } else {
-            audio.pause();
           }
         });
         el.addEventListener('mouseenter', function () { el.sceneEl.canvas.style.cursor = 'pointer'; });
@@ -52,43 +86,24 @@
       }
     });
 
-    // ---------- 1) radio-audio (igual que en la version anterior) ----------
-    // Al hacer clic sobre la radio reproduce / pausa el audio y enciende
-    // o apaga su luz roja (la pieza del modelo llamada "indicador").
-    AFRAME.registerComponent('radio-audio', {
-      schema: { src: { type: 'selector' } },
+    // ---------- 1b) portal ----------
+    // Puerta clickeable que teletransporta la camara DENTRO DE LA MISMA ESCENA
+    // (no carga otra pagina ni otro <a-scene>). Se usa para entrar/salir de los
+    // interiores (CECOF, sala del gimnasio) sin romper la continuidad cartografica.
+    AFRAME.registerComponent('portal', {
+      schema: { destino: { type: 'vec3' }, mirara: { type: 'vec3' } },
       init: function () {
-        var audio = this.data.src;
-        var el = this.el;
-        var indicador = null;
-
-        function luz(encendida) {
-          if (!indicador) return;
-          indicador.material.emissive.setHex(encendida ? 0xff3b1f : 0x000000);
-          indicador.material.emissiveIntensity = encendida ? 2 : 0;
-        }
-
-        el.addEventListener('model-loaded', function () {
-          el.object3D.traverse(function (o) {
-            if (o.name === 'indicador' && o.material) {
-              o.material = o.material.clone();
-              indicador = o;
-            }
-          });
-          luz(!audio.paused);
-        });
-
+        var el = this.el, data = this.data;
+        el.classList.add('clickable');
         el.addEventListener('click', function () {
-          if (audio.paused) {
-            audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
-          } else {
-            audio.pause();
+          var cam = document.querySelector('[camera]');
+          if (!cam) return;
+          cam.object3D.position.set(data.destino.x, data.destino.y, data.destino.z);
+          if (data.mirara) {
+            var dx = data.mirara.x - data.destino.x, dz = data.mirara.z - data.destino.z;
+            cam.components['look-controls'].yawObject.rotation.y = Math.atan2(-dx, -dz);
           }
         });
-
-        audio.addEventListener('play', function () { luz(true); });
-        audio.addEventListener('pause', function () { luz(false); });
-
         el.addEventListener('mouseenter', function () { el.sceneEl.canvas.style.cursor = 'pointer'; });
         el.addEventListener('mouseleave', function () { el.sceneEl.canvas.style.cursor = ''; });
       }
@@ -321,13 +336,87 @@
           })));
         }
 
-        // --- 9. Los 12 puntos del mapa ---
+        // --- 9. INTERIORES: el CECOF (con la radio adentro) y la sala del gimnasio (con el mural).
+        // Se ubican lejos del barrio para no superponerse visualmente; se entra y sale por una
+        // puerta clickeable (componente "portal") que mueve la camara DENTRO de la misma escena,
+        // sin cambiar de pagina: la cartografia no se corta.
+        var SALA_CECOF = new THREE.Vector3(300, 0, 0);
+        var SALA_GIMNASIO = new THREE.Vector3(300, 0, 60);
+        // Posicion de cada fragmento del mural dentro de la imagen completa (u,v de 0 a 1,
+        // 0,0 = esquina superior izquierda de la foto real), para que el fragmento aparezca
+        // en la sala EXACTAMENTE donde esta ese icono en el mural fisico.
+        var FRAGMENTOS_UV = {
+          gimnasio: [0.459, 0.568], radio: [0.415, 0.534], cecof: [0.421, 0.579],
+          huerta: [0.376, 0.514], 'perritos-a': [0.370, 0.656], 'perritos-b': [0.567, 0.651],
+          'comida-rapida': [0.591, 0.733], cancha: [0.629, 0.683], locomocion: [0.747, 0.616]
+        };
+
+        function construirCaja(ancho, alto, padre) {
+          crear('a-plane', { width: ancho, height: ancho, rotation: '-90 0 0', color: '#D8D2C2' }, padre);
+          crear('a-box', { width: ancho, height: alto, depth: 0.15, position: '0 ' + (alto / 2) + ' ' + (-ancho / 2), color: '#EDE9DD' }, padre);
+          crear('a-box', { width: 0.15, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
+          crear('a-box', { width: 0.15, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
+          crear('a-entity', { light: 'type: point; intensity: 0.7; distance: 25', position: '0 ' + (alto - 0.4) + ' 0' }, padre);
+        }
+
+        function construirSalaCecof(fueraQ, radioData) {
+          var sala = crear('a-entity', { position: SALA_CECOF.x + ' ' + SALA_CECOF.y + ' ' + SALA_CECOF.z });
+          construirCaja(8, 4, sala);
+          crear('a-entity', { text: 'value: CECOF Norte Grande; align: center; color: #333; width: 10', position: '0 3.3 -3.9' }, sala);
+          if (radioData) {
+            // la radio: vive AQUI adentro (no en el mapa exterior), como pediste.
+            var marca = crear('a-entity', { position: '0 0 -1' }, sala);
+            crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marca);
+            crear('a-entity', { 'gltf-model': '#radio', position: '0 1 0', scale: '2 2 2' }, marca);
+            marca.setAttribute('punto-audio', 'src: #audio-' + radioData.audio + '; clics: ' + (radioData.clics || 2) + '; id: ' + radioData.fragmento);
+            crear('a-entity', {
+              text: 'value: radio (clic para recolectar); align: center; color: #222; width: 6', position: '0 2.3 0', 'mirar-camara': ''
+            }, marca);
+          }
+          var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 3.9', color: '#8C6A46' }, sala);
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' 1.6 ' + (fueraQ.y + 4) + '; mirara: ' + fueraQ.x + ' 1.6 ' + fueraQ.y);
+          crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 3.85' }, sala);
+        }
+
+        function construirSalaGimnasio(fueraQ) {
+          var sala = crear('a-entity', { position: SALA_GIMNASIO.x + ' ' + SALA_GIMNASIO.y + ' ' + SALA_GIMNASIO.z });
+          construirCaja(9, 5, sala);
+          var murW = 8, murH = murW * 1066 / 1600;
+          crear('a-plane', {
+            width: murW, height: murH, position: '0 ' + (murH / 2 + 0.3) + ' -3.92',
+            material: 'src: #mural-completo; opacity: 0.18; shader: flat'
+          }, sala);
+          Object.keys(FRAGMENTOS_UV).forEach(function (clave) {
+            var uv = FRAGMENTOS_UV[clave];
+            var x = (uv[0] - 0.5) * murW;
+            var y = (murH / 2 + 0.3) + (0.5 - uv[1]) * murH;
+            var frag = crear('a-plane', {
+              width: 1, height: 1, position: x + ' ' + y + ' -3.9',
+              material: 'src: #frag-' + clave + '; shader: flat'
+            }, sala);
+            frag.setAttribute('visible', estaRecolectado(clave));
+            frag.classList.add('fragmento-' + clave);
+          });
+          window.addEventListener('norte-maps:recoleccion', function () {
+            Object.keys(FRAGMENTOS_UV).forEach(function (clave) {
+              var frag = sala.querySelector('.fragmento-' + clave);
+              if (frag) frag.setAttribute('visible', estaRecolectado(clave));
+            });
+          });
+          var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 4.9', color: '#8C6A46' }, sala);
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' 1.6 ' + (fueraQ.y + 6) + '; mirara: ' + fueraQ.x + ' 1.6 ' + fueraQ.y);
+          crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 4.85' }, sala);
+        }
+
+        // --- 10. Los puntos del mapa exterior ---
         var camaraInicio = null;                       // donde parte el visitante (se calcula abajo)
-        var radioPos = null;
+        var radioData = datos.puntos.find(function (p) { return p.tipo === 'radio'; });
         datos.puntos.forEach(function (p) {
+          if (p.tipo === 'radio') return;   // la radio ya no va afuera: vive dentro del CECOF
           var q = aEscena(p.lon, p.lat);
           var marca = crear('a-entity', { position: q.x + ' 0 ' + q.y });
           var altoCartel = 3.4;
+          var esCecof = p.nombre === 'cecof';
 
           if (p.tipo === 'gimnasio') {
             // el gimnasio: todavia no tenemos su contorno real, asi que se marca con un palo alto y una esfera roja
@@ -339,17 +428,13 @@
             altoCartel = 5.2;
             camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 20 * escala);   // 20 m reales al sur del gimnasio
             if (p.audio) {
-              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio);
+              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
-          } else if (p.tipo === 'radio') {
-            // la radio 3D sobre un pedestal; hace clic para escuchar
-            radioPos = q;
-            crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marca);
-            marca.radio = crear('a-entity', {
-              class: 'clickable', 'gltf-model': '#radio', 'radio-audio': 'src: #audio-' + (p.audio || 'radio'),
-              position: '0 1 0', scale: '2 2 2'
-            }, marca);
-            altoCartel = 2.6;
+            // puerta a la sala del mural (chica, a un costado, para no tapar la vista del barrio)
+            var puertaGim = crear('a-box', { width: 0.5, height: 1.3, depth: 0.08, position: '2.5 0.65 1.8', color: '#8C6A46' }, marca);
+            puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' 1.6 ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' 1.6 ' + SALA_GIMNASIO.z);
+            crear('a-entity', { text: 'value: Entrar a la sala; align: center; color: #222; width: 3', position: '2.5 1.5 1.75', 'mirar-camara': '' }, marca);
+            construirSalaGimnasio(q);
           } else {
             // un punto cualquiera: palo + esfera de color
             // (segments-radial / segments-width: cuantos lados tiene la figura; menos lados = menos triangulos)
@@ -361,15 +446,21 @@
               material: 'color: ' + colorPunto + '; emissive: ' + colorPunto + '; emissiveIntensity: 0.4'
             }, marca);
             if (p.audio) {
-              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio);
+              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
+            }
+            if (esCecof) {
+              // el CECOF es un edificio con interior: adentro esta la radio
+              var puertaCecof = crear('a-box', { width: 0.5, height: 1.3, depth: 0.08, position: '1.8 0.65 1.2', color: '#8C6A46' }, marca);
+              puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' 1.6 ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' 1.6 ' + SALA_CECOF.z);
+              crear('a-entity', { text: 'value: Entrar al CECOF; align: center; color: #222; width: 3', position: '1.8 1.5 1.15', 'mirar-camara': '' }, marca);
+              construirSalaCecof(q, radioData);
             }
           }
 
           // cartel con el nombre (siempre mirando al visitante)
-          var sufijoAudio = (p.audio && p.tipo !== 'radio') ? ' (clic para escuchar)' : '';
-          var texto = p.tipo === 'radio' ? p.nombre + ' (clic para escuchar)' : p.nombre + sufijoAudio;
+          var sufijoAudio = p.audio ? ' (clic para recolectar)' : '';
           crear('a-entity', {
-            text: 'value: ' + texto + '; align: center; anchor: center; color: #222222; width: 8',
+            text: 'value: ' + p.nombre + sufijoAudio + '; align: center; anchor: center; color: #222222; width: 8',
             position: '0 ' + altoCartel + ' 0',
             'mirar-camara': ''
           }, marca);
@@ -384,21 +475,14 @@
           });
         });
 
-        // --- 11. Camara: empieza junto al gimnasio, mirando hacia la radio ---
+        // --- 11. Camara: empieza junto al gimnasio, mirando hacia el centro del barrio ---
         var self = this;
         function ubicarVisitante() {
           var cam = document.querySelector('[camera]');
           if (!cam || !camaraInicio) return;
           cam.object3D.position.copy(camaraInicio);
-          if (radioPos) {
-            var dx = radioPos.x - camaraInicio.x, dz = radioPos.y - camaraInicio.z;
-            var yaw = Math.atan2(-dx, -dz);            // giro necesario para que "adelante" apunte a la radio
-            cam.components['look-controls'].yawObject.rotation.y = yaw;
-            // y la radio se gira para quedar de frente al visitante
-            var giroRadio = Math.atan2(camaraInicio.x - radioPos.x, camaraInicio.z - radioPos.y) * 180 / Math.PI;
-            var r = document.querySelector('[radio-audio]');
-            if (r) r.setAttribute('rotation', '0 ' + giroRadio + ' 0');
-          }
+          var yaw = Math.atan2(-(0 - camaraInicio.x), -(0 - camaraInicio.z));
+          cam.components['look-controls'].yawObject.rotation.y = yaw;
           self.camara = cam;
         }
         if (escena.hasLoaded) ubicarVisitante(); else escena.addEventListener('loaded', ubicarVisitante);
@@ -435,6 +519,12 @@
 
 <body>
   <div id="hud"></div>
+
+  <!-- Contador de recoleccion: cuantos "cassettes" ya se sacaron del mapa.
+       Se actualiza solo (evento norte-maps:recoleccion) cada vez que recolectas uno. -->
+  <div id="contador-recoleccion"
+    style="position:fixed; left:12px; top:12px; z-index:10; font:13px system-ui, sans-serif;
+           padding:6px 12px; border-radius:6px; background:rgba(255,255,255,0.85); color:#222;"></div>
 
   <!-- Boton para ver el documental (video externo embebido via YouTube, no alojado aqui:
        el original pesa ~2GB, asi que se reproduce desde la fuente externa). -->
@@ -487,6 +577,18 @@
       <audio id="audio-cancha" src="activos/cancha.mp3" preload="auto"></audio>
       <audio id="audio-locomocion" src="activos/locomocion.mp3" preload="auto"></audio>
       <audio id="audio-huerta" src="activos/huerta.mp3" preload="auto"></audio>
+      <!-- Foto real del mural pintado en el gimnasio y sus 9 fragmentos recortados
+           (uno por cada relato recolectable), usados en la sala del gimnasio. -->
+      <img id="mural-completo" src="activos/mural/mural-completo.jpg">
+      <img id="frag-gimnasio" src="activos/mural/gimnasio.jpg">
+      <img id="frag-radio" src="activos/mural/radio.jpg">
+      <img id="frag-cecof" src="activos/mural/cecof.jpg">
+      <img id="frag-huerta" src="activos/mural/huerta.jpg">
+      <img id="frag-perritos-a" src="activos/mural/perritos-a.jpg">
+      <img id="frag-perritos-b" src="activos/mural/perritos-b.jpg">
+      <img id="frag-comida-rapida" src="activos/mural/comida-rapida.jpg">
+      <img id="frag-cancha" src="activos/mural/cancha.jpg">
+      <img id="frag-locomocion" src="activos/mural/locomocion.jpg">
     </a-assets>
 
     <!-- EL BARRIO. Para cambiar la escala: escala: 0.2 (1:5)  ->  escala: 1 (tamaño real) -->
