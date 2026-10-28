@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Norte Maps v4</title>
+  <title>Norte Maps v5</title>
 
   <!-- Libreria A-Frame: convierte las etiquetas <a-...> en objetos 3D -->
   <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
@@ -107,6 +107,7 @@
     //   - el suelo y el "territorio urbano" (el poligono del mapa)
     //   - las calles, como cintas sobre el suelo, con su nombre
     //   - los 12 puntos del mapa (gimnasio, radio, humedal...) con su cartel
+    //   - los edificios en volumen: los reales (de OpenStreetMap) y casas de relleno inventadas
     //   - los puntos de reciclaje (cilindros chicos de colores)
     // El gimnasio queda en el centro del mundo (0, 0, 0).
     //
@@ -115,6 +116,10 @@
     //   a) en la direccion del navegador agregar  ?escala=1   (ej: http://127.0.0.1:5500/index_v4.html?escala=1)
     //   b) en el HTML de mas abajo cambiar  norte-maps="escala: 0.2"  por  norte-maps="escala: 1"
     // Si hay ?escala= en la direccion, manda por sobre el numero escrito en el HTML.
+    //
+    // OTROS PARAMETROS DE LA DIRECCION (para probar sin editar el codigo):
+    //   ?relleno=no   -> oculta las casas de relleno y deja solo los edificios reales de OpenStreetMap
+    //   ?altura=2     -> exagera la altura de los edificios (2 = el doble). Util a escala 1:5, donde todo se ve bajito.
     AFRAME.registerComponent('norte-maps', {
       schema: { escala: { default: 0.2 } },
 
@@ -128,6 +133,9 @@
         var param = parseFloat(new URLSearchParams(location.search).get('escala'));
         var escala = param > 0 ? param : this.data.escala;
         this.escala = escala;
+        var params = new URLSearchParams(location.search);
+        var mostrarRelleno = params.get('relleno') !== 'no';
+        var exagera = parseFloat(params.get('altura')) > 0 ? parseFloat(params.get('altura')) : 1;
 
         // --- 2. De grados (lon, lat) a metros de la escena ---
         // Un grado de latitud mide ~111 km (radio de la Tierra * pi/180).
@@ -181,7 +189,7 @@
         el.setObject3D('territorio', malla(territorio, '#C2D9BC', -2));
 
         // --- 7. Calles: cada calle es una "cinta" (una tira) que sigue sus vertices ---
-        var anchoCalle = Math.max(3, 9 * escala);     // ancho en la escena: 3 con escala 0.2, 9 a escala real
+        var anchoCalle = 9 * escala;                  // ~9 m reales, en la escala elegida
         var pos = [], idx = [];                       // todas las calles se juntan en UNA sola malla (mas liviano)
 
         function agregarCinta(puntos, ancho) {
@@ -243,6 +251,53 @@
           });
         });
 
+        // --- 8b. Edificios en volumen ---
+        // Cada edificio es un poligono (su contorno, en grados) que se "extruye": se levanta hasta su altura.
+        // Todos se juntan en UNA sola malla. Cada edificio tiene:
+        //   - un techo: el poligono dividido en triangulos (ShapeUtils.triangulateShape)
+        //   - paredes: un rectangulo por cada lado del contorno
+        // La altura en la escena = altura real * escala * exageracion (la de ?altura=).
+        var posE = [], colE = [], idxE = [];
+        var colorReal = new THREE.Color('#F6E7C8'), colorRelleno = new THREE.Color('#E6E2D8');
+        var nReal = 0, nRelleno = 0;
+        (datos.edificios || []).forEach(function (e, k) {
+          if (!e.real && !mostrarRelleno) return;
+          var contorno = e.pts.map(function (p) { return aEscena(p[0], p[1]); });
+          var alto = e.alto * escala * exagera;
+          // un poco de variacion de tono entre un edificio y otro (sin azar real: depende del numero de edificio)
+          var techo = (e.real ? colorReal : colorRelleno).clone();
+          techo.offsetHSL(0, 0, (((k * 37) % 11) / 11 - 0.5) * 0.06);
+          var pared = techo.clone().multiplyScalar(0.9);
+          if (e.real) nReal++; else nRelleno++;
+
+          // techo
+          var base = posE.length / 3;
+          contorno.forEach(function (p) { posE.push(p.x, alto, p.y); colE.push(techo.r, techo.g, techo.b); });
+          THREE.ShapeUtils.triangulateShape(contorno.slice(), []).forEach(function (t) {
+            idxE.push(base + t[0], base + t[1], base + t[2]);
+          });
+          // paredes
+          for (var i = 0; i < contorno.length; i++) {
+            var a = contorno[i], b = contorno[(i + 1) % contorno.length];
+            var v = posE.length / 3;
+            posE.push(a.x, 0, a.y, b.x, 0, b.y, b.x, alto, b.y, a.x, alto, a.y);
+            for (var c = 0; c < 4; c++) colE.push(pared.r, pared.g, pared.b);
+            idxE.push(v, v + 1, v + 2, v, v + 2, v + 3);
+          }
+        });
+        this.nReal = nReal;
+        this.nRelleno = nRelleno;
+        if (posE.length) {
+          var geoE = new THREE.BufferGeometry();
+          geoE.setAttribute('position', new THREE.Float32BufferAttribute(posE, 3));
+          geoE.setAttribute('color', new THREE.Float32BufferAttribute(colE, 3));
+          geoE.setIndex(idxE);
+          // flatShading: cada cara se ilumina por separado (se ve "maqueta" y no hacen falta normales)
+          el.setObject3D('edificios', new THREE.Mesh(geoE, new THREE.MeshStandardMaterial({
+            vertexColors: true, flatShading: true, roughness: 1, side: THREE.DoubleSide
+          })));
+        }
+
         // --- 9. Los 12 puntos del mapa ---
         var camaraInicio = null;                       // donde parte el visitante (se calcula abajo)
         var radioPos = null;
@@ -252,11 +307,14 @@
           var altoCartel = 3.4;
 
           if (p.tipo === 'gimnasio') {
-            // el gimnasio: una caja de ~30 x 20 m reales (aproximada), solo como volumen de referencia
-            var ancho = 30 * escala, fondo = 20 * escala;
-            crear('a-box', { width: ancho, height: 6, depth: fondo, position: '0 3 0', color: '#C8553D' }, marca);
-            altoCartel = 7.2;
-            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + fondo / 2 + 3);
+            // el gimnasio: todavia no tenemos su contorno real, asi que se marca con un palo alto y una esfera roja
+            crear('a-cylinder', { radius: 0.08, height: 4, position: '0 2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
+            crear('a-sphere', {
+              radius: 0.45, position: '0 4.2 0', color: '#C8553D', 'segments-width': 12, 'segments-height': 8,
+              material: 'color: #C8553D; emissive: #C8553D; emissiveIntensity: 0.4'
+            }, marca);
+            altoCartel = 5.2;
+            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 20 * escala);   // 20 m reales al sur del gimnasio
           } else if (p.tipo === 'radio') {
             // la radio 3D sobre un pedestal; hace clic para escuchar
             radioPos = q;
@@ -327,7 +385,8 @@
         var linea2 = distanciaEscena === null ? '' : '<br>Estas a ' + Math.round(distanciaEscena / esc) + ' m reales del gimnasio';
         this.hud.innerHTML = linea1 + linea2 +
           '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar' +
-          '<br>Otra escala: agregar <b>?escala=1</b> a la direccion';
+          '<br>Otra escala: agregar <b>?escala=1</b> a la direccion' +
+          '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
       },
 
       // Cada ~15 cuadros actualizamos la distancia al gimnasio (no hace falta hacerlo en cada cuadro).
