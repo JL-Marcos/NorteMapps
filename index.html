@@ -461,7 +461,10 @@
           crear('a-box', { width: grosor, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
           crear('a-box', { width: grosor, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
           crear('a-entity', { light: 'type: point; intensity: 0.7; distance: ' + (25 * escala) }, padre).setAttribute('position', '0 ' + (alto - 0.4 * escala) + ' 0');
-          return { ancho: ancho, alto: alto };
+          // se devuelve tambien "grosor": cualquier cosa que se cuelgue de una pared (mural,
+          // pantalla, rack) tiene que quedar DELANTE de ella, no en su linea central -- si no,
+          // queda dentro del espesor de la pared y la tapa el propio muro (invisible).
+          return { ancho: ancho, alto: alto, grosor: grosor };
         }
 
         function construirSalaCecof(fueraQ, radioData) {
@@ -492,7 +495,7 @@
           // debajo en letra chica. Gris y bloqueado hasta depositarlo; celeste y
           // clickeable despues -- clic para reproducir (pausa cualquier otro audio).
           var otrosFragmentos = datos.puntos.filter(function (p) { return p.fragmento && p.fragmento !== 'radio'; });
-          var xPared = -dim.ancho / 2 + 0.02 * escala;      // pegado a la pared izquierda
+          var xPared = -dim.ancho / 2 + dim.grosor + 0.02 * escala;      // DELANTE de la pared izquierda (no dentro)
           var zBase = -1.3 * escala, pasoZ = 0.9 * escala, pasoY = -0.7 * escala, yBase = dim.alto * 0.62;
           otrosFragmentos.forEach(function (p, i) {
             var col = i % 4, fila = Math.floor(i / 4);
@@ -526,14 +529,17 @@
 
           var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.ancho / 2 - 0.05 * escala), color: '#8C6A46' }, sala);
           // al volver afuera, la altura de ojo vuelve a ser la de la escala exterior (1.6*escala), no la real del interior
-          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 4) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 4 * escala) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
         }
 
         function construirSalaGimnasio(fueraQ) {
           var sala = crear('a-entity', { position: SALA_GIMNASIO.x + ' ' + SALA_GIMNASIO.y + ' ' + SALA_GIMNASIO.z });
           var dim = construirCaja(9, 5, sala);   // 9x5 METROS REALES -- construirCaja aplica la escala
-          var murWreal = 8, murW = murWreal * escala, murH = murW * 1066 / 1600;
-          var zMural = -dim.ancho / 2 + 0.02 * escala;
+          // OJO: con el ancho real de la foto (1600x1066 px), un mural de 8 m de ancho da
+          // 5.33 m de alto -- MAS ALTO que el techo de 5 m de esta sala (quedaba cortado
+          // contra el techo). 6 m de ancho da 4 m de alto, con margen de sobra.
+          var murWreal = 6, murW = murWreal * escala, murH = murW * 1066 / 1600;
+          var zMural = -dim.ancho / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared de atras (no dentro)
           crear('a-plane', {
             width: murW, height: murH, position: '0 ' + (murH / 2 + 0.3 * escala) + ' ' + zMural,
             material: 'src: #mural-completo; opacity: 0.18; shader: flat'
@@ -561,7 +567,7 @@
           // al completarse, se desbloquea y un clic reproduce el documental (antes
           // esto era un boton flotante fuera de la escena -- ahora vive adentro, sin
           // texto explicativo: el color apagado/encendido ya comunica el estado).
-          var xPared = -dim.ancho / 2 + 0.02 * escala;
+          var xPared = -dim.ancho / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared lateral (no dentro)
           var pantalla = crear('a-plane', {
             width: 2.6 * escala, height: 1.5 * escala, position: xPared + ' ' + (1.8 * escala) + ' ' + (dim.ancho * 0.3), rotation: '0 90 0', color: '#1A1A1A'
           }, sala);
@@ -582,7 +588,7 @@
           window.addEventListener('norte-maps:recoleccion', refrescarPantalla);
 
           var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.ancho / 2 - 0.05 * escala), color: '#8C6A46' }, sala);
-          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 6) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 6 * escala) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
         }
 
         // --- 10. Los puntos del mapa exterior ---
@@ -636,7 +642,10 @@
             // Sin panel/marco decorativo aparte (ese "volumen de otro color" no correspondia a
             // nada real) -- la puerta sola, puesta justo en el borde del circulo de colision.
             var puertaGim = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (puertaGimPos.x * escala) + ' ' + (0.65 * escala) + ' ' + (puertaGimPos.z * escala), color: '#8C6A46', class: 'clickable' }, marca);
-            puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + SALA_GIMNASIO.z);
+            // OJO ESCALA: el "+3" tiene que escalar igual que todo lo demas -- sin esto,
+            // entrar por la puerta te teletransportaba a 15 m del centro de la sala (afuera
+            // de sus paredes, que miden ~4.5 m de radio), por eso se sentia "roto".
+            puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + (SALA_GIMNASIO.z + 3 * escala) + '; mirara: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + SALA_GIMNASIO.z);
             construirSalaGimnasio(q);
           } else {
             // un punto cualquiera: palo + esfera de color, o cassette sobre mesita si tiene audio.
@@ -678,7 +687,8 @@
               // edificio, y la puerta va justo en su borde.
               colisiones.push({ x: q.x, z: q.y, radio: radioCecof * escala });
               var puertaCecof = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (puertaCecofPos.x * escala) + ' ' + (0.65 * escala) + ' ' + (puertaCecofPos.z * escala), color: '#8C6A46', class: 'clickable' }, marca);
-              puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + SALA_CECOF.z);
+              // mismo fix que la puerta del gimnasio: el "+3" tiene que escalar.
+              puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + (SALA_CECOF.z + 3 * escala) + '; mirara: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + SALA_CECOF.z);
               construirSalaCecof(q, radioData);
             }
           }
