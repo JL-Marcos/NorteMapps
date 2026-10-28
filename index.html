@@ -82,6 +82,27 @@
         if (a.id !== exceptoId && !a.paused) a.pause();
       });
     }
+    // "Apagar" un cassette ya recolectado: en vez de desaparecer del mapa (dejaba un
+    // hueco raro), se queda ahi pero en gris y sin poder clickearlo de nuevo -- el mapa
+    // sigue "encendido" (todo visible, da contexto), solo el icono ya usado se nota apagado.
+    function apagarColeccionable(el) {
+      el.querySelectorAll('.clickable').forEach(function (hijo) {
+        hijo.classList.remove('clickable');
+        hijo.removeAttribute('material');
+        hijo.setAttribute('color', '#9C9C94');
+      });
+    }
+    // Reinicio completo del prototipo: borra todo lo recolectado/llevado y recarga.
+    function reiniciarExperiencia() {
+      if (!confirm('¿Reiniciar la experiencia? Se borra todo lo recolectado en este navegador.')) return;
+      Object.keys(localStorage).filter(function (k) { return k.indexOf('norte-maps-') === 0; })
+        .forEach(function (k) { localStorage.removeItem(k); });
+      location.reload();
+    }
+    window.addEventListener('load', function () {
+      var btn = document.getElementById('boton-reiniciar');
+      if (btn) btn.addEventListener('click', reiniciarExperiencia);
+    });
     // Cuando algo nuevo se vuelve clickeable DESPUES de la carga inicial (ej. un
     // cajon del rack que se desbloquea), hay que avisarle al raycaster -- no detecta
     // solo los cambios de clase (ver nota de [[raycaster-clickable]] en el vault).
@@ -111,7 +132,7 @@
         this.hovering = false;
 
         if (this.data.id && (estaRecolectado(this.data.id) || estaLlevando(this.data.id))) {
-          el.setAttribute('visible', false);   // ya se saco del mapa antes: no vuelve a aparecer
+          apagarColeccionable(el);   // ya se saco antes: se queda ahi, pero apagado (gris, no clickeable)
           return;
         }
         // OJO: este componente se pega en un contenedor SIN geometria propia (ver [[raycaster-clickable]]
@@ -138,7 +159,7 @@
 
           if (self.contador >= self.data.clics && self.data.id) {
             marcarLlevando(self.data.id);
-            el.setAttribute('visible', false);
+            apagarColeccionable(el);
           }
         });
       }
@@ -356,10 +377,19 @@
         var posE = [], colE = [], idxE = [];
         var colorReal = new THREE.Color('#F6E7C8'), colorRelleno = new THREE.Color('#E6E2D8');
         var nReal = 0, nRelleno = 0;
+        var colisionesEdificios = [];   // circulo (centro+radio) por edificio, para no poder atravesarlo caminando
+        this.colisionesEdificios = colisionesEdificios;
         (datos.edificios || []).forEach(function (e, k) {
           if (!e.real && !mostrarRelleno) return;
           var contorno = e.pts.map(function (p) { return aEscena(p[0], p[1]); });
           var alto = e.alto * escala * exagera;
+          // circulo de colision: centro = promedio de vertices, radio = el mas lejano + margen
+          var cx = 0, cz = 0;
+          contorno.forEach(function (p) { cx += p.x; cz += p.y; });
+          cx /= contorno.length; cz /= contorno.length;
+          var radioEdif = 0;
+          contorno.forEach(function (p) { radioEdif = Math.max(radioEdif, Math.hypot(p.x - cx, p.y - cz)); });
+          colisionesEdificios.push({ x: cx, z: cz, radio: radioEdif + 0.3 * escala });
           // un poco de variacion de tono entre un edificio y otro (sin azar real: depende del numero de edificio)
           var techo = (e.real ? colorReal : colorRelleno).clone();
           techo.offsetHSL(0, 0, (((k * 37) % 11) / 11 - 0.5) * 0.06);
@@ -409,40 +439,37 @@
           'comida-rapida': [0.591, 0.733], cancha: [0.629, 0.683], locomocion: [0.747, 0.616]
         };
 
-        function construirCaja(ancho, alto, padre) {
+        // OJO ESCALA: "ancho"/"alto" llegan ya en metros reales (sin multiplicar por "escala").
+        // Esta funcion los escala ella misma -- asi construirCaja(8,4,...) siempre significa
+        // "8x4 metros reales", sea cual sea la escala elegida (antes quedaban fijos y
+        // desproporcionados en relacion al barrio achicado: el bug que hacia "ver raro el mapa").
+        function construirCaja(anchoReal, altoReal, padre) {
+          var ancho = anchoReal * escala, alto = altoReal * escala;
+          var grosor = 0.15 * escala;
           crear('a-plane', { width: ancho, height: ancho, rotation: '-90 0 0', color: '#D8D2C2' }, padre);
-          crear('a-box', { width: ancho, height: alto, depth: 0.15, position: '0 ' + (alto / 2) + ' ' + (-ancho / 2), color: '#EDE9DD' }, padre);
-          crear('a-box', { width: 0.15, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
-          crear('a-box', { width: 0.15, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
-          crear('a-entity', { light: 'type: point; intensity: 0.7; distance: 25', position: '0 ' + (alto - 0.4) + ' 0' }, padre);
+          crear('a-box', { width: ancho, height: alto, depth: grosor, position: '0 ' + (alto / 2) + ' ' + (-ancho / 2), color: '#EDE9DD' }, padre);
+          crear('a-box', { width: grosor, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
+          crear('a-box', { width: grosor, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: '#EDE9DD' }, padre);
+          crear('a-entity', { light: 'type: point; intensity: 0.7; distance: ' + (25 * escala) }, padre).setAttribute('position', '0 ' + (alto - 0.4 * escala) + ' 0');
+          return { ancho: ancho, alto: alto };
         }
 
         function construirSalaCecof(fueraQ, radioData) {
           var sala = crear('a-entity', { position: SALA_CECOF.x + ' ' + SALA_CECOF.y + ' ' + SALA_CECOF.z });
-          construirCaja(8, 4, sala);
-          crear('a-entity', { text: 'value: CECOF Norte Grande; align: center; color: #333; width: 10', position: '0 3.3 -3.9' }, sala);
+          var dim = construirCaja(8, 4, sala);   // 8x4 METROS REALES -- construirCaja aplica la escala
 
           // La radio: es el APARATO, no un cassette para recolectar. Su propio relato
           // esta siempre disponible. Un clic con las manos vacias lo reproduce/pausa;
           // un clic LLEVANDO cassettes los deposita a todos de una vez (quedan en el
-          // rack de al lado, listos para reproducirse).
+          // rack de la pared, listos para reproducirse).
           if (radioData) {
-            var marcaRadio = crear('a-entity', { position: '0 0 -1' }, sala);
-            crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marcaRadio);
-            var modeloRadio = crear('a-entity', { 'gltf-model': '#radio', position: '0 1 0', scale: '2 2 2', class: 'clickable' }, marcaRadio);
-            var carteloRadio = crear('a-entity', {
-              text: 'value: radio (clic para reproducir / depositar); align: center; color: #222; width: 6',
-              position: '0 2.3 0', 'mirar-camara': ''
-            }, marcaRadio);
-            modeloRadio.addEventListener('mouseenter', function () { modeloRadio.sceneEl.canvas.style.cursor = 'pointer'; modeloRadio.object3D.scale.setScalar(2.2); });
-            modeloRadio.addEventListener('mouseleave', function () { modeloRadio.sceneEl.canvas.style.cursor = ''; modeloRadio.object3D.scale.setScalar(2); });
+            var marcaRadio = crear('a-entity', { position: '0 0 ' + (-1 * escala) }, sala);
+            crear('a-box', { width: 0.6 * escala, height: 1 * escala, depth: 0.5 * escala, position: '0 ' + (0.5 * escala) + ' 0', color: '#9C7A54' }, marcaRadio);
+            var modeloRadio = crear('a-entity', { 'gltf-model': '#radio', position: '0 ' + (1 * escala) + ' 0', scale: (2 * escala) + ' ' + (2 * escala) + ' ' + (2 * escala), class: 'clickable' }, marcaRadio);
+            modeloRadio.addEventListener('mouseenter', function () { modeloRadio.sceneEl.canvas.style.cursor = 'pointer'; modeloRadio.object3D.scale.setScalar(2.2 * escala); });
+            modeloRadio.addEventListener('mouseleave', function () { modeloRadio.sceneEl.canvas.style.cursor = ''; modeloRadio.object3D.scale.setScalar(2 * escala); });
             modeloRadio.addEventListener('click', function () {
-              if (contarLlevando() > 0) {
-                depositarTodo();
-                carteloRadio.setAttribute('text', 'value', 'relatos depositados');
-                setTimeout(function () { carteloRadio.setAttribute('text', 'value', 'radio (clic para reproducir / depositar)'); }, 1800);
-                return;
-              }
+              if (contarLlevando() > 0) { depositarTodo(); return; }
               var audioRadio = document.getElementById('audio-' + radioData.audio);
               if (!audioRadio) return;
               if (audioRadio.paused) { pausarOtrosAudios(audioRadio.id); audioRadio.play().catch(function (e) { console.warn(e); }); }
@@ -450,18 +477,21 @@
             });
           }
 
-          // El rack: un cassette "ranura" por cada relato que se encuentra afuera (todos
-          // menos la radio). Gris y bloqueado hasta depositarlo; celeste y clickeable
-          // despues -- clic para reproducir (pausa cualquier otro audio que sonara).
+          // El rack: EN LA PARED izquierda (no sobre una mesa), un cassette "ranura" por
+          // cada relato que se encuentra afuera (todos menos la radio), con su nombre
+          // debajo en letra chica. Gris y bloqueado hasta depositarlo; celeste y
+          // clickeable despues -- clic para reproducir (pausa cualquier otro audio).
           var otrosFragmentos = datos.puntos.filter(function (p) { return p.fragmento && p.fragmento !== 'radio'; });
-          crear('a-box', { width: 3.2, height: 0.06, depth: 0.5, position: '2 0.82 -2.5', color: '#8C6A46' }, sala);
+          var xPared = -dim.ancho / 2 + 0.02 * escala;      // pegado a la pared izquierda
+          var zBase = -1.3 * escala, pasoZ = 0.9 * escala, pasoY = -0.7 * escala, yBase = dim.alto * 0.62;
           otrosFragmentos.forEach(function (p, i) {
             var col = i % 4, fila = Math.floor(i / 4);
-            var x = 2 - 1.2 + col * 0.8, z = -2.5 - fila * 0.55;
-            var ranura = crear('a-entity', { position: x + ' 0 ' + z }, sala);
-            var caja = crear('a-box', { width: 0.16, height: 0.03, depth: 0.1, position: '0 0.87 0', color: '#6B6B66' }, ranura);
+            var z = zBase + col * pasoZ, y = yBase + fila * pasoY;
+            var ranura = crear('a-entity', { position: xPared + ' ' + y + ' ' + z, rotation: '0 90 0' }, sala);
+            var caja = crear('a-box', { width: 0.1 * escala, height: 0.16 * escala, depth: 0.03 * escala, color: '#6B6B66' }, ranura);
             crear('a-entity', {
-              text: 'value: ' + p.nombre + '; align: center; color: #555; width: 2.5', position: '0 0.78 0', rotation: '-90 0 0'
+              text: 'value: ' + p.nombre + '; align: center; color: #555; width: ' + (1.6 * escala),
+              position: '0 ' + (-0.13 * escala) + ' ' + (0.02 * escala)
             }, ranura);
             function refrescarRanura() {
               var listo = estaRecolectado(p.fragmento);
@@ -484,26 +514,26 @@
             window.addEventListener('norte-maps:recoleccion', refrescarRanura);
           });
 
-          var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 3.9', color: '#8C6A46' }, sala);
+          var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.ancho / 2 - 0.05 * escala), color: '#8C6A46' }, sala);
           // al volver afuera, la altura de ojo vuelve a ser la de la escala exterior (1.6*escala), no la real del interior
           puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 4) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
-          crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 3.85' }, sala);
         }
 
         function construirSalaGimnasio(fueraQ) {
           var sala = crear('a-entity', { position: SALA_GIMNASIO.x + ' ' + SALA_GIMNASIO.y + ' ' + SALA_GIMNASIO.z });
-          construirCaja(9, 5, sala);
-          var murW = 8, murH = murW * 1066 / 1600;
+          var dim = construirCaja(9, 5, sala);   // 9x5 METROS REALES -- construirCaja aplica la escala
+          var murWreal = 8, murW = murWreal * escala, murH = murW * 1066 / 1600;
+          var zMural = -dim.ancho / 2 + 0.02 * escala;
           crear('a-plane', {
-            width: murW, height: murH, position: '0 ' + (murH / 2 + 0.3) + ' -3.92',
+            width: murW, height: murH, position: '0 ' + (murH / 2 + 0.3 * escala) + ' ' + zMural,
             material: 'src: #mural-completo; opacity: 0.18; shader: flat'
           }, sala);
           Object.keys(FRAGMENTOS_UV).forEach(function (clave) {
             var uv = FRAGMENTOS_UV[clave];
             var x = (uv[0] - 0.5) * murW;
-            var y = (murH / 2 + 0.3) + (0.5 - uv[1]) * murH;
+            var y = (murH / 2 + 0.3 * escala) + (0.5 - uv[1]) * murH;
             var frag = crear('a-plane', {
-              width: 1, height: 1, position: x + ' ' + y + ' -3.9',
+              width: 1 * escala, height: 1 * escala, position: x + ' ' + y + ' ' + (zMural + 0.02 * escala),
               material: 'src: #frag-' + clave + '; shader: flat'
             }, sala);
             frag.setAttribute('visible', estaRecolectado(clave));
@@ -519,19 +549,16 @@
           // El "cine": pantalla + proyector en la pared lateral izquierda. Queda
           // bloqueada (gris, sin clic) hasta reunir los 9 relatos en el mural/rack;
           // al completarse, se desbloquea y un clic reproduce el documental (antes
-          // esto era un boton flotante fuera de la escena -- ahora vive adentro).
+          // esto era un boton flotante fuera de la escena -- ahora vive adentro, sin
+          // texto explicativo: el color apagado/encendido ya comunica el estado).
+          var xPared = -dim.ancho / 2 + 0.02 * escala;
           var pantalla = crear('a-plane', {
-            width: 2.6, height: 1.5, position: '-4.4 1.8 0', rotation: '0 90 0', color: '#1A1A1A'
+            width: 2.6 * escala, height: 1.5 * escala, position: xPared + ' ' + (1.8 * escala) + ' ' + (dim.ancho * 0.3), rotation: '0 90 0', color: '#1A1A1A'
           }, sala);
-          crear('a-box', { width: 0.3, height: 0.2, depth: 0.4, position: '3.5 2.6 0', rotation: '0 90 0', color: '#444' }, sala);
-          var textoPantalla = crear('a-entity', {
-            text: 'value: Completa los 9 relatos\npara desbloquear el documental; align: center; color: #999; width: 2.2',
-            position: '-4.38 1.8 0', rotation: '0 90 0'
-          }, sala);
+          crear('a-box', { width: 0.3 * escala, height: 0.2 * escala, depth: 0.4 * escala, position: (-xPared) + ' ' + (2.6 * escala) + ' ' + (dim.ancho * 0.3), rotation: '0 90 0', color: '#444' }, sala);
           function refrescarPantalla() {
             var listo = contarRecolectados() === TOTAL_FRAGMENTOS;
             pantalla.setAttribute('color', listo ? '#000' : '#1A1A1A');
-            textoPantalla.setAttribute('visible', !listo);
             if (listo) pantalla.classList.add('clickable'); else pantalla.classList.remove('clickable');
           }
           refrescarPantalla();
@@ -544,19 +571,27 @@
           });
           window.addEventListener('norte-maps:recoleccion', refrescarPantalla);
 
-          var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 4.9', color: '#8C6A46' }, sala);
+          var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.ancho / 2 - 0.05 * escala), color: '#8C6A46' }, sala);
           puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 6) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
-          crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 4.85' }, sala);
         }
 
         // --- 10. Los puntos del mapa exterior ---
         var camaraInicio = null;                       // donde parte el visitante (se calcula abajo)
         var radioData = datos.puntos.find(function (p) { return p.tipo === 'radio'; });
+        var colisiones = [];   // circulos (centro+radio, en unidades de escena) contra los que choca la camara
+        this.colisiones = colisiones;
         datos.puntos.forEach(function (p) {
           if (p.tipo === 'radio') return;   // la radio ya no va afuera: vive dentro del CECOF
           var q = aEscena(p.lon, p.lat);
+          // CORRECCION DE TERRENO: el GPS de Google My Maps ubicaba el CECOF a ~21 m del
+          // gimnasio: el usuario, que conoce el lugar, confirmo que en realidad estan en
+          // la MISMA calle, el MISMO lado, a 4 m uno del otro. Se prioriza el dato real
+          // por sobre el pin aproximado (igual que se hizo antes con "la radio esta
+          // dentro del CECOF"): el CECOF se reubica pegado al gimnasio, a su izquierda
+          // (si uno sale del gimnasio mirando a la calle, hacia +x: izquierda = -z = norte).
+          if (p.nombre === 'cecof') { q = new THREE.Vector2(0, -4 * escala); }
           var marca = crear('a-entity', { position: q.x + ' 0 ' + q.y });
-          var altoCartel = 3.4;
+          var altoCartel = 3.4 * escala;
           var esCecof = p.nombre === 'cecof';
 
           if (p.tipo === 'gimnasio') {
@@ -565,15 +600,15 @@
             // asi, cuando se recolecta y se oculta, SOLO desaparece el marcador -- la puerta para entrar a la
             // sala del mural sigue ahi (antes estaba todo junto y la puerta desaparecia con el cassette, bug corregido).
             var coleccionable = crear('a-entity', {}, marca);
-            crear('a-cylinder', { radius: 0.08, height: 4, position: '0 2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, coleccionable);
+            crear('a-cylinder', { radius: 0.08 * escala, height: 4 * escala, position: '0 ' + (2 * escala) + ' 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, coleccionable);
             crear('a-sphere', {
-              radius: 0.45, position: '0 4.2 0', color: '#C8553D', 'segments-width': 12, 'segments-height': 8,
+              radius: 0.45 * escala, position: '0 ' + (4.2 * escala) + ' 0', color: '#C8553D', 'segments-width': 12, 'segments-height': 8,
               material: 'color: #C8553D; emissive: #C8553D; emissiveIntensity: 0.4',
               // la clase "clickable" va en la esfera (geometria real), no en "coleccionable" (vacio):
               // el raycaster de A-Frame solo intersecta geometria puesta DIRECTAMENTE en el elemento marcado.
               class: p.audio ? 'clickable' : ''
             }, coleccionable);
-            altoCartel = 5.2;
+            altoCartel = 5.2 * escala;
             // La altura del ojo tambien se escala (1.6 m reales * escala): a escala reducida,
             // si la camara quedara a 1.6 unidades fijas, el visitante se sentiria "gigante"
             // frente al barrio en miniatura. A escala 1 esto no cambia nada (1.6*1 = 1.6).
@@ -581,11 +616,12 @@
             if (p.audio) {
               coleccionable.setAttribute('punto-audio', 'clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
-            // puerta a la sala del mural: con un marco/pared chica detras para que no "flote en la nada"
-            crear('a-box', { width: 1.6, height: 2.2, depth: 0.08, position: '2.5 1.1 1.75', color: '#D8D2C2' }, marca);
-            var puertaGim = crear('a-box', { width: 0.5, height: 1.3, depth: 0.1, position: '2.5 0.65 1.8', color: '#8C6A46', class: 'clickable' }, marca);
-            puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' 1.6 ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' 1.6 ' + SALA_GIMNASIO.z);
-            crear('a-entity', { text: 'value: Entrar a la sala; align: center; color: #222; width: 3', position: '2.5 2.1 1.74', 'mirar-camara': '' }, marca);
+            colisiones.push({ x: q.x, z: q.y, radio: 7 * escala });   // el volumen del gimnasio (aprox.)
+            // la puerta del gimnasio da a la calle (eje +x), igual que la del CECOF: ambos
+            // frentes miran al mismo lado -- con un marco/pared chica detras para que no "flote en la nada"
+            crear('a-box', { width: 1.6 * escala, height: 2.2 * escala, depth: 0.08 * escala, position: (2.5 * escala) + ' ' + (1.1 * escala) + ' ' + (1.75 * escala), color: '#D8D2C2' }, marca);
+            var puertaGim = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (2.5 * escala) + ' ' + (0.65 * escala) + ' ' + (1.8 * escala), color: '#8C6A46', class: 'clickable' }, marca);
+            puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + SALA_GIMNASIO.z);
             construirSalaGimnasio(q);
           } else {
             // un punto cualquiera: palo + esfera de color, o cassette sobre mesita si tiene audio.
@@ -593,19 +629,19 @@
             // de la puerta (CECOF) para que esta ultima no desaparezca al recolectar el cassette.
             var coleccionable = crear('a-entity', {}, marca);
             if (p.audio) {
-              // una mesita BAJA (0.22 m) con el cassette encima: antes media 0.5 m y quedaba por
-              // encima de la linea de vista con la camara ya mas baja (altura de ojo = 1.6*escala).
-              crear('a-box', { width: 0.4, height: 0.22, depth: 0.4, position: '0 0.11 0', color: '#9C7A54' }, coleccionable);
-              var cassette = crear('a-entity', { position: '0 0.24 0' }, coleccionable);
+              // una mesita BAJA (0.22 m reales) con el cassette encima: antes media 0.5 m y quedaba
+              // por encima de la linea de vista con la camara ya mas baja (altura de ojo = 1.6*escala).
+              crear('a-box', { width: 0.4 * escala, height: 0.22 * escala, depth: 0.4 * escala, position: '0 ' + (0.11 * escala) + ' 0', color: '#9C7A54' }, coleccionable);
+              var cassette = crear('a-entity', { position: '0 ' + (0.24 * escala) + ' 0' }, coleccionable);
               // la clase "clickable" va en la geometria del cassette (no en la mesita ni en "coleccionable")
-              crear('a-box', { width: 0.18, height: 0.03, depth: 0.11, color: '#3B8FA8', class: 'clickable' }, cassette);
-              crear('a-cylinder', { radius: 0.028, height: 0.034, position: '-0.045 0.02 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassette);
-              crear('a-cylinder', { radius: 0.028, height: 0.034, position: '0.045 0.02 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassette);
-              altoCartel = 0.65;   // el cartel ahora va justo sobre la mesita baja
+              crear('a-box', { width: 0.18 * escala, height: 0.03 * escala, depth: 0.11 * escala, color: '#3B8FA8', class: 'clickable' }, cassette);
+              crear('a-cylinder', { radius: 0.028 * escala, height: 0.034 * escala, position: (-0.045 * escala) + ' ' + (0.02 * escala) + ' 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassette);
+              crear('a-cylinder', { radius: 0.028 * escala, height: 0.034 * escala, position: (0.045 * escala) + ' ' + (0.02 * escala) + ' 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassette);
+              altoCartel = 0.65 * escala;   // el cartel ahora va justo sobre la mesita baja
             } else {
-              crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, coleccionable);
+              crear('a-cylinder', { radius: 0.06 * escala, height: 2.4 * escala, position: '0 ' + (1.2 * escala) + ' 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, coleccionable);
               crear('a-sphere', {
-                radius: 0.28, position: '0 2.5 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
+                radius: 0.28 * escala, position: '0 ' + (2.5 * escala) + ' 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
                 material: 'color: #E8743B; emissive: #E8743B; emissiveIntensity: 0.4'
               }, coleccionable);
             }
@@ -613,30 +649,35 @@
               coleccionable.setAttribute('punto-audio', 'clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
             if (esCecof) {
-              // el CECOF es un edificio con interior: adentro esta la radio
-              crear('a-box', { width: 1.6, height: 2.2, depth: 0.08, position: '1.8 1.1 1.15', color: '#D8D2C2' }, marca);
-              var puertaCecof = crear('a-box', { width: 0.5, height: 1.3, depth: 0.1, position: '1.8 0.65 1.2', color: '#8C6A46', class: 'clickable' }, marca);
-              puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' 1.6 ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' 1.6 ' + SALA_CECOF.z);
-              crear('a-entity', { text: 'value: Entrar al CECOF; align: center; color: #222; width: 3', position: '1.8 2.1 1.14', 'mirar-camara': '' }, marca);
+              // el CECOF es un edificio con interior: adentro esta la radio. Puerta mirando
+              // a la misma calle que la del gimnasio (eje +x), como confirmo el usuario.
+              colisiones.push({ x: q.x, z: q.y, radio: 3 * escala });
+              crear('a-box', { width: 1.6 * escala, height: 2.2 * escala, depth: 0.08 * escala, position: (1.8 * escala) + ' ' + (1.1 * escala) + ' ' + (1.15 * escala), color: '#D8D2C2' }, marca);
+              var puertaCecof = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (1.8 * escala) + ' ' + (0.65 * escala) + ' ' + (1.2 * escala), color: '#8C6A46', class: 'clickable' }, marca);
+              puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + SALA_CECOF.z);
               construirSalaCecof(q, radioData);
             }
           }
 
-          // cartel con el nombre (siempre mirando al visitante)
-          var sufijoAudio = p.audio ? ' (clic para recolectar)' : '';
+          // cartel con el nombre (siempre mirando al visitante, sin instrucciones -- el
+          // hover/pulso ya comunica que se puede interactuar)
           crear('a-entity', {
-            text: 'value: ' + p.nombre + sufijoAudio + '; align: center; anchor: center; color: #222222; width: 8',
+            text: 'value: ' + p.nombre + '; align: center; anchor: center; color: #222222; width: ' + (8 * escala),
             position: '0 ' + altoCartel + ' 0',
             'mirar-camara': ''
           }, marca);
         });
+
+        // Union de los dos tipos de colision (edificios reales/relleno + gimnasio/CECOF):
+        // se usan en tick() para que caminar en linea recta no atraviese los volumenes.
+        this.colisiones = colisiones.concat(colisionesEdificios);
 
         // --- 10. Puntos de reciclaje: cilindros chicos de color ---
         var colores = { naturaleza: '#4E9F5B', basural: '#7A7A7A', rocura: '#3B8FA8' };
         datos.reciclaje.forEach(function (r) {
           var q = aEscena(r.lon, r.lat);
           crear('a-cylinder', {
-            radius: 0.25, height: 0.5, position: q.x + ' 0.25 ' + q.y, color: colores[r.tipo] || '#999999', 'segments-radial': 10, 'segments-height': 1
+            radius: 0.25 * escala, height: 0.5 * escala, position: q.x + ' ' + (0.25 * escala) + ' ' + q.y, color: colores[r.tipo] || '#999999', 'segments-radial': 10, 'segments-height': 1
           });
         });
 
@@ -722,10 +763,30 @@
           '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
       },
 
+      // Colision simple: cada edificio/volumen se aproxima a un circulo (centro+radio).
+      // Si la camara quedo adentro de alguno (caminando en linea recta la atravesaria),
+      // se la empuja hacia afuera por el borde mas cercano. Corre TODOS los cuadros
+      // (tiene que ser inmediato); el HUD/minimapa, mas caros, corren cada 15 cuadros.
+      resolverColisiones: function () {
+        if (!this.colisiones || !this.colisiones.length) return;
+        var p = this.camara.object3D.position;
+        for (var i = 0; i < this.colisiones.length; i++) {
+          var c = this.colisiones[i];
+          var dx = p.x - c.x, dz = p.z - c.z;
+          var dist = Math.hypot(dx, dz);
+          if (dist < c.radio && dist > 0.0001) {
+            var k = c.radio / dist;
+            p.x = c.x + dx * k;
+            p.z = c.z + dz * k;
+          }
+        }
+      },
+
       // Cada ~15 cuadros actualizamos la distancia al gimnasio y el minimapa
-      // (no hace falta redibujar en cada cuadro).
+      // (no hace falta redibujar en cada cuadro); la colision, en cambio, se revisa siempre.
       tick: function () {
         if (!this.camara) return;
+        this.resolverColisiones();
         this.contador++;
         if (this.contador % 15) return;
         var p = this.camara.object3D.position;
@@ -746,8 +807,8 @@
        derecha), para no toparse ni con ese contador ni con el boton del documental
        (que esta abajo a la derecha). -->
   <canvas id="minimapa" width="150" height="150"
-    style="position:fixed; right:12px; top:56px; z-index:10; border-radius:8px;
-           border:2px solid rgba(0,0,0,0.3); background:#ECECEC;"></canvas>
+    style="position:fixed; right:12px; top:56px; z-index:10; border-radius:8px; opacity:0.6;
+           border:1px solid rgba(0,0,0,0.2); background:transparent;"></canvas>
 
   <!-- Contador de recoleccion: cuantos "cassettes" ya se sacaron del mapa.
        Se actualiza solo (evento norte-maps:recoleccion) cada vez que recolectas uno.
@@ -756,6 +817,14 @@
   <div id="contador-recoleccion"
     style="position:fixed; right:12px; top:12px; z-index:10; font:13px system-ui, sans-serif;
            padding:6px 12px; border-radius:6px; background:rgba(255,255,255,0.85); color:#222;"></div>
+
+  <!-- Reiniciar: borra lo recolectado en ESTE navegador y recarga (no habia forma de
+       volver a empezar sin abrir la consola). Pide confirmacion antes de borrar. -->
+  <button id="boton-reiniciar"
+    style="position:fixed; left:12px; top:12px; z-index:10; font:12px system-ui, sans-serif;
+           padding:5px 10px; border-radius:6px; border:0; background:rgba(0,0,0,0.55); color:#fff; cursor:pointer;">
+    ⟲ Reiniciar
+  </button>
 
   <!-- El documental (video externo embebido via YouTube, no alojado aqui: el original
        pesa ~2GB) ya NO se abre con un boton flotante: ahora se reproduce desde la
@@ -830,7 +899,7 @@
       <!-- Lo que llevas en la mano: aparece cuando recolectas un cassette del mapa y
            hasta que lo depositas en la radio (ver marcarLlevando/depositarTodo en el
            script). Es hijo de la camara, asi que se mueve y gira con la vista. -->
-      <a-entity id="mano-cassettes" visible="false" position="0.4 -0.3 -0.7" scale="0.8 0.8 0.8">
+      <a-entity id="mano-cassettes" visible="false" position="0.45 -0.32 -0.9" scale="0.35 0.35 0.35">
         <a-box width="0.18" height="0.03" depth="0.11" color="#3B8FA8"></a-box>
         <a-cylinder radius="0.028" height="0.034" position="-0.045 0.02 0" color="#222" segments-radial="10"></a-cylinder>
         <a-cylinder radius="0.028" height="0.034" position="0.045 0.02 0" color="#222" segments-radial="10"></a-cylinder>
