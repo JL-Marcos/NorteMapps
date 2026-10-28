@@ -606,14 +606,14 @@
           var offCartel = { x: 0, z: 0 };   // si el cassette se desplaza (ver mas abajo), el cartel lo sigue
 
           if (p.tipo === 'gimnasio') {
-            // el gimnasio: todavia no tenemos su contorno real, asi que se marca con un palo alto y una esfera roja.
-            // OJO COLISION: el circulo de colision del edificio (mas abajo) esta centrado en el
-            // origen (0,0) de este punto -- si el cassette tambien estuviera ahi, quedaria
-            // "adentro" del circulo y el visitante nunca podria acercarse lo suficiente para
-            // clickearlo (bug reportado: "quedaron atrapados"). Por eso el cassette se desplaza
-            // a la calle (offset en +x,+z, el mismo frente donde esta la puerta), bien afuera
-            // del radio de colision.
-            var offGim = { x: 4 * escala, z: 2.2 * escala };
+            // el gimnasio: todavia no tenemos su contorno real, asi que el VOLUMEN DE REFERENCIA
+            // es el palo+esfera roja (marca donde esta el edificio) y el circulo de colision
+            // (mas abajo) representa el volumen real del edificio. La puerta va EN EL BORDE de
+            // ese circulo -- entrando justo al volumen, como corresponde -- y el cassette queda
+            // al costado de la puerta, apenas mas afuera (alcanzable sin atravesar el volumen).
+            var puertaGimPos = { x: 2.5, z: 1.75 };                  // metros reales, desde el centro
+            var radioGim = Math.hypot(puertaGimPos.x, puertaGimPos.z);  // el circulo pasa justo por la puerta
+            var offGim = { x: (puertaGimPos.x + 1) * escala, z: (puertaGimPos.z + 1) * escala };  // al costado
             offCartel = offGim;
             var coleccionable = crear('a-entity', { position: offGim.x + ' 0 ' + offGim.z }, marca);
             crear('a-cylinder', { radius: 0.08 * escala, height: 4 * escala, position: '0 ' + (2 * escala) + ' 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, coleccionable);
@@ -632,25 +632,23 @@
             if (p.audio) {
               coleccionable.setAttribute('punto-audio', 'clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
-            // Radio de colision mas chico que antes (2.5 m reales, solo el volumen del edificio):
-            // el cassette (a ~4.6 m del centro) y la puerta (a ~3 m) quedan afuera, alcanzables.
-            colisiones.push({ x: q.x, z: q.y, radio: 2.5 * escala });
-            // la puerta del gimnasio da a la calle (eje +x), igual que la del CECOF: ambos
-            // frentes miran al mismo lado -- con un marco/pared chica detras para que no "flote en la nada"
-            crear('a-box', { width: 1.6 * escala, height: 2.2 * escala, depth: 0.08 * escala, position: (2.5 * escala) + ' ' + (1.1 * escala) + ' ' + (1.75 * escala), color: '#D8D2C2' }, marca);
-            var puertaGim = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (2.5 * escala) + ' ' + (0.65 * escala) + ' ' + (1.8 * escala), color: '#8C6A46', class: 'clickable' }, marca);
+            colisiones.push({ x: q.x, z: q.y, radio: radioGim * escala });
+            // Sin panel/marco decorativo aparte (ese "volumen de otro color" no correspondia a
+            // nada real) -- la puerta sola, puesta justo en el borde del circulo de colision.
+            var puertaGim = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (puertaGimPos.x * escala) + ' ' + (0.65 * escala) + ' ' + (puertaGimPos.z * escala), color: '#8C6A46', class: 'clickable' }, marca);
             puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' ' + (1.6 * escala) + ' ' + SALA_GIMNASIO.z);
             construirSalaGimnasio(q);
           } else {
             // un punto cualquiera: palo + esfera de color, o cassette sobre mesita si tiene audio.
             // Igual que el gimnasio: el objeto coleccionable va en su PROPIA sub-entidad, separada
             // de la puerta (CECOF) para que esta ultima no desaparezca al recolectar el cassette.
-            // El CECOF es un edificio chico con su propio circulo de colision (mas abajo); si
-            // el cassette quedara pegado a su centro, el visitante nunca podria acercarse lo
-            // suficiente para clickearlo (mismo bug que en el gimnasio). Para el CECOF
-            // especificamente, se desplaza "a la parte de atras" (lado opuesto a la calle,
-            // eje -x) como pediste, bien afuera del radio de colision.
-            var offColeccionable = esCecof ? { x: -2.4 * escala, z: 0 } : { x: 0, z: 0 };
+            // El CECOF: el volumen de referencia es el circulo de colision del edificio (mas
+            // abajo), con la puerta puesta justo en su borde -- igual criterio que el gimnasio.
+            // El cassette del CECOF queda al costado de SU PUERTA (no "en la calle" ni "atras",
+            // como se habia puesto antes -- correccion pedida).
+            var puertaCecofPos = { x: 1.8, z: 1.15 };
+            var radioCecof = Math.hypot(puertaCecofPos.x, puertaCecofPos.z);
+            var offColeccionable = esCecof ? { x: (puertaCecofPos.x + 1) * escala, z: (puertaCecofPos.z + 1) * escala } : { x: 0, z: 0 };
             if (esCecof) offCartel = offColeccionable;
             var coleccionable = crear('a-entity', { position: offColeccionable.x + ' 0 ' + offColeccionable.z }, marca);
             if (p.audio) {
@@ -676,10 +674,10 @@
             if (esCecof) {
               // el CECOF es un edificio con interior: adentro esta la radio. Puerta mirando
               // a la misma calle que la del gimnasio (eje +x), como confirmo el usuario.
-              // 1.8 m reales: el cassette (a 2.4 m, atras) y la puerta (a ~2.1 m, al frente) quedan afuera.
-              colisiones.push({ x: q.x, z: q.y, radio: 1.8 * escala });
-              crear('a-box', { width: 1.6 * escala, height: 2.2 * escala, depth: 0.08 * escala, position: (1.8 * escala) + ' ' + (1.1 * escala) + ' ' + (1.15 * escala), color: '#D8D2C2' }, marca);
-              var puertaCecof = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (1.8 * escala) + ' ' + (0.65 * escala) + ' ' + (1.2 * escala), color: '#8C6A46', class: 'clickable' }, marca);
+              // Sin panel/marco decorativo aparte -- el circulo de colision ES el volumen del
+              // edificio, y la puerta va justo en su borde.
+              colisiones.push({ x: q.x, z: q.y, radio: radioCecof * escala });
+              var puertaCecof = crear('a-box', { width: 0.5 * escala, height: 1.3 * escala, depth: 0.1 * escala, position: (puertaCecofPos.x * escala) + ' ' + (0.65 * escala) + ' ' + (puertaCecofPos.z * escala), color: '#8C6A46', class: 'clickable' }, marca);
               puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' ' + (1.6 * escala) + ' ' + SALA_CECOF.z);
               construirSalaCecof(q, radioData);
             }
