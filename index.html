@@ -367,7 +367,8 @@
             // la radio: vive AQUI adentro (no en el mapa exterior), como pediste.
             var marca = crear('a-entity', { position: '0 0 -1' }, sala);
             crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marca);
-            crear('a-entity', { 'gltf-model': '#radio', position: '0 1 0', scale: '2 2 2' }, marca);
+            // la clase "clickable" va en el modelo 3D mismo (tiene geometria), no en "marca" (vacio)
+            crear('a-entity', { 'gltf-model': '#radio', position: '0 1 0', scale: '2 2 2', class: 'clickable' }, marca);
             marca.setAttribute('punto-audio', 'src: #audio-' + radioData.audio + '; clics: ' + (radioData.clics || 2) + '; id: ' + radioData.fragmento);
             crear('a-entity', {
               text: 'value: radio (clic para recolectar); align: center; color: #222; width: 6', position: '0 2.3 0', 'mirar-camara': ''
@@ -423,36 +424,58 @@
             crear('a-cylinder', { radius: 0.08, height: 4, position: '0 2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
             crear('a-sphere', {
               radius: 0.45, position: '0 4.2 0', color: '#C8553D', 'segments-width': 12, 'segments-height': 8,
-              material: 'color: #C8553D; emissive: #C8553D; emissiveIntensity: 0.4'
+              material: 'color: #C8553D; emissive: #C8553D; emissiveIntensity: 0.4',
+              // IMPORTANTE: el raycaster de A-Frame solo intersecta geometria puesta DIRECTAMENTE
+              // en el elemento marcado "clickable" (no revisa hijos de un contenedor vacio).
+              // Por eso la clase va aqui, en la esfera que SI tiene geometria, y no en "marca".
+              class: p.audio ? 'clickable' : ''
             }, marca);
             altoCartel = 5.2;
             camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 20 * escala);   // 20 m reales al sur del gimnasio
             if (p.audio) {
               marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
-            // puerta a la sala del mural (chica, a un costado, para no tapar la vista del barrio)
-            var puertaGim = crear('a-box', { width: 0.5, height: 1.3, depth: 0.08, position: '2.5 0.65 1.8', color: '#8C6A46' }, marca);
+            // puerta a la sala del mural: con un marco/pared chica detras para que no "flote en la nada"
+            crear('a-box', { width: 1.6, height: 2.2, depth: 0.08, position: '2.5 1.1 1.75', color: '#D8D2C2' }, marca);
+            var puertaGim = crear('a-box', { width: 0.5, height: 1.3, depth: 0.1, position: '2.5 0.65 1.8', color: '#8C6A46', class: 'clickable' }, marca);
             puertaGim.setAttribute('portal', 'destino: ' + SALA_GIMNASIO.x + ' 1.6 ' + (SALA_GIMNASIO.z + 3) + '; mirara: ' + SALA_GIMNASIO.x + ' 1.6 ' + SALA_GIMNASIO.z);
-            crear('a-entity', { text: 'value: Entrar a la sala; align: center; color: #222; width: 3', position: '2.5 1.5 1.75', 'mirar-camara': '' }, marca);
+            crear('a-entity', { text: 'value: Entrar a la sala; align: center; color: #222; width: 3', position: '2.5 2.1 1.74', 'mirar-camara': '' }, marca);
             construirSalaGimnasio(q);
           } else {
             // un punto cualquiera: palo + esfera de color
             // (segments-radial / segments-width: cuantos lados tiene la figura; menos lados = menos triangulos)
-            // si el punto tiene relato grabado (p.audio), la esfera se pinta celeste y queda clickeable
-            var colorPunto = p.audio ? '#3B8FA8' : '#E8743B';
+            // si el punto tiene relato grabado (p.audio): se marca con un CASSETTE (caja + 2 carretes),
+            // no con una esfera generica -- asi se lee claramente como "esto se recolecta".
+            // Si no tiene audio, sigue siendo el palo + esfera naranja de siempre.
             crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
-            crear('a-sphere', {
-              radius: 0.28, position: '0 2.5 0', color: colorPunto, 'segments-width': 12, 'segments-height': 8,
-              material: 'color: ' + colorPunto + '; emissive: ' + colorPunto + '; emissiveIntensity: 0.4'
-            }, marca);
+            if (p.audio) {
+              var cassette = crear('a-entity', { position: '0 2.5 0' }, marca);
+              crear('a-box', {
+                width: 0.5, height: 0.32, depth: 0.1, color: '#3B8FA8', class: 'clickable'
+              }, cassette);
+              crear('a-cylinder', {
+                radius: 0.09, height: 0.11, position: '-0.13 0 0.06', rotation: '90 0 0', color: '#222',
+                'segments-radial': 10, class: 'clickable'
+              }, cassette);
+              crear('a-cylinder', {
+                radius: 0.09, height: 0.11, position: '0.13 0 0.06', rotation: '90 0 0', color: '#222',
+                'segments-radial': 10, class: 'clickable'
+              }, cassette);
+            } else {
+              crear('a-sphere', {
+                radius: 0.28, position: '0 2.5 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
+                material: 'color: #E8743B; emissive: #E8743B; emissiveIntensity: 0.4'
+              }, marca);
+            }
             if (p.audio) {
               marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
             if (esCecof) {
               // el CECOF es un edificio con interior: adentro esta la radio
-              var puertaCecof = crear('a-box', { width: 0.5, height: 1.3, depth: 0.08, position: '1.8 0.65 1.2', color: '#8C6A46' }, marca);
+              crear('a-box', { width: 1.6, height: 2.2, depth: 0.08, position: '1.8 1.1 1.15', color: '#D8D2C2' }, marca);
+              var puertaCecof = crear('a-box', { width: 0.5, height: 1.3, depth: 0.1, position: '1.8 0.65 1.2', color: '#8C6A46', class: 'clickable' }, marca);
               puertaCecof.setAttribute('portal', 'destino: ' + SALA_CECOF.x + ' 1.6 ' + (SALA_CECOF.z + 3) + '; mirara: ' + SALA_CECOF.x + ' 1.6 ' + SALA_CECOF.z);
-              crear('a-entity', { text: 'value: Entrar al CECOF; align: center; color: #222; width: 3', position: '1.8 1.5 1.15', 'mirar-camara': '' }, marca);
+              crear('a-entity', { text: 'value: Entrar al CECOF; align: center; color: #222; width: 3', position: '1.8 2.1 1.14', 'mirar-camara': '' }, marca);
               construirSalaCecof(q, radioData);
             }
           }
