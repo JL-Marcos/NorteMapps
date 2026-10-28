@@ -375,7 +375,8 @@
             }, marca);
           }
           var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 3.9', color: '#8C6A46' }, sala);
-          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' 1.6 ' + (fueraQ.y + 4) + '; mirara: ' + fueraQ.x + ' 1.6 ' + fueraQ.y);
+          // al volver afuera, la altura de ojo vuelve a ser la de la escala exterior (1.6*escala), no la real del interior
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 4) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
           crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 3.85' }, sala);
         }
 
@@ -405,7 +406,7 @@
             });
           });
           var puerta = crear('a-box', { width: 1, height: 2, depth: 0.1, position: '0 1 4.9', color: '#8C6A46' }, sala);
-          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' 1.6 ' + (fueraQ.y + 6) + '; mirara: ' + fueraQ.x + ' 1.6 ' + fueraQ.y);
+          puerta.setAttribute('portal', 'destino: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + (fueraQ.y + 6) + '; mirara: ' + fueraQ.x + ' ' + (1.6 * escala) + ' ' + fueraQ.y);
           crear('a-entity', { text: 'value: Salir; align: center; color: #fff; width: 4', position: '0 1.3 4.85' }, sala);
         }
 
@@ -431,7 +432,10 @@
               class: p.audio ? 'clickable' : ''
             }, marca);
             altoCartel = 5.2;
-            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 32 * escala);   // 32 m reales al sur del gimnasio (mas lejos para no arrancar pegado a un edificio a escala 1:1)
+            // La altura del ojo tambien se escala (1.6 m reales * escala): a escala reducida,
+            // si la camara quedara a 1.6 unidades fijas, el visitante se sentiria "gigante"
+            // frente al barrio en miniatura. A escala 1 esto no cambia nada (1.6*1 = 1.6).
+            camaraInicio = new THREE.Vector3(q.x, 1.6 * escala, q.y + 32 * escala);
             if (p.audio) {
               marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
@@ -502,6 +506,58 @@
           });
         });
 
+        // --- 10b. Minimapa: vista cenital fija del barrio, para ubicarse en contexto ---
+        // Proyecta territorio/calles/puntos a coordenadas 2D (reusando aEscena) y los
+        // dibuja en un <canvas> aparte de la escena 3D; en cada tick se vuelve a dibujar
+        // la posicion/orientacion del visitante encima.
+        var canvasMini = document.getElementById('minimapa');
+        if (canvasMini) {
+          var ctxMini = canvasMini.getContext('2d');
+          var terrMini = datos.territorio.map(function (p) { return aEscena(p[0], p[1]); });
+          var callesMini = datos.calles.map(function (c) { return c.pts.map(function (p) { return aEscena(p[0], p[1]); }); });
+          var puntosMini = datos.puntos.filter(function (p) { return p.tipo !== 'radio'; }).map(function (p) {
+            var q = aEscena(p.lon, p.lat); return { x: q.x, y: q.y, audio: !!p.audio };
+          });
+          var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          terrMini.forEach(function (p) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+          var margenMini = (maxX - minX) * 0.08;
+          minX -= margenMini; maxX += margenMini; minY -= margenMini; maxY += margenMini;
+          var W = canvasMini.width, H = canvasMini.height;
+          var escalaMini = Math.min(W / (maxX - minX), H / (maxY - minY));
+          function proyMini(x, y) { return { x: (x - minX) * escalaMini, y: (y - minY) * escalaMini }; }
+          this.dibujarMinimapa = function () {
+            ctxMini.clearRect(0, 0, W, H);
+            ctxMini.beginPath();
+            terrMini.forEach(function (p, i) { var q = proyMini(p.x, p.y); if (i === 0) ctxMini.moveTo(q.x, q.y); else ctxMini.lineTo(q.x, q.y); });
+            ctxMini.closePath();
+            ctxMini.fillStyle = '#C2D9BC'; ctxMini.fill();
+            ctxMini.strokeStyle = '#9C9C94'; ctxMini.lineWidth = 1.2;
+            callesMini.forEach(function (c) {
+              ctxMini.beginPath();
+              c.forEach(function (p, i) { var q = proyMini(p.x, p.y); if (i === 0) ctxMini.moveTo(q.x, q.y); else ctxMini.lineTo(q.x, q.y); });
+              ctxMini.stroke();
+            });
+            puntosMini.forEach(function (p) {
+              var q = proyMini(p.x, p.y);
+              ctxMini.beginPath(); ctxMini.fillStyle = p.audio ? '#3B8FA8' : '#E8743B';
+              ctxMini.arc(q.x, q.y, 2.3, 0, Math.PI * 2); ctxMini.fill();
+            });
+            var cam = document.querySelector('[camera]');
+            if (cam) {
+              var pos = cam.object3D.position;
+              var q = proyMini(pos.x, pos.z);
+              var yaw = cam.components['look-controls'] ? cam.components['look-controls'].yawObject.rotation.y : 0;
+              ctxMini.save();
+              ctxMini.translate(q.x, q.y); ctxMini.rotate(-yaw);
+              ctxMini.fillStyle = '#C8553D';
+              ctxMini.beginPath(); ctxMini.moveTo(0, -5); ctxMini.lineTo(3.5, 4); ctxMini.lineTo(-3.5, 4); ctxMini.closePath();
+              ctxMini.fill();
+              ctxMini.restore();
+            }
+          };
+          this.dibujarMinimapa();
+        }
+
         // --- 11. Camara: empieza junto al gimnasio, mirando hacia el centro del barrio ---
         var self = this;
         function ubicarVisitante() {
@@ -532,13 +588,15 @@
           '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
       },
 
-      // Cada ~15 cuadros actualizamos la distancia al gimnasio (no hace falta hacerlo en cada cuadro).
+      // Cada ~15 cuadros actualizamos la distancia al gimnasio y el minimapa
+      // (no hace falta redibujar en cada cuadro).
       tick: function () {
         if (!this.camara) return;
         this.contador++;
         if (this.contador % 15) return;
         var p = this.camara.object3D.position;
         this.escribirHud(Math.sqrt(p.x * p.x + p.z * p.z));
+        if (this.dibujarMinimapa) this.dibujarMinimapa();
       }
     });
   </script>
@@ -546,6 +604,16 @@
 
 <body>
   <div id="hud"></div>
+
+  <!-- Minimapa: vista cenital fija del barrio (calles, territorio, puntos) con la
+       posicion y orientacion del visitante, para ubicarse en contexto mientras se
+       camina. Lo dibuja el componente norte-maps (ver funcion "dibujarMinimapa"). -->
+  <!-- top:56px: justo debajo del contador de relatos (que ocupa la esquina superior
+       derecha), para no toparse ni con ese contador ni con el boton del documental
+       (que esta abajo a la derecha). -->
+  <canvas id="minimapa" width="150" height="150"
+    style="position:fixed; right:12px; top:56px; z-index:10; border-radius:8px;
+           border:2px solid rgba(0,0,0,0.3); background:#ECECEC;"></canvas>
 
   <!-- Contador de recoleccion: cuantos "cassettes" ya se sacaron del mapa.
        Se actualiza solo (evento norte-maps:recoleccion) cada vez que recolectas uno.
@@ -620,10 +688,12 @@
       <img id="frag-locomocion" src="activos/mural/locomocion.jpg">
     </a-assets>
 
-    <!-- EL BARRIO, a tamaño real (1:1): asi la sensacion de recorrido es la correcta (caminar
-         metro a metro), en vez de sentirse "gigante" como pasaba a escala 0.2 (1:5).
-         Para volver a la escala reducida: escala: 0.2, o agregar ?escala=0.2 en la direccion. -->
-    <a-entity id="mapa" norte-maps="escala: 1"></a-entity>
+    <!-- EL BARRIO, a escala reducida (1:5) para que el recorrido completo sea comodo.
+         La sensacion de "gigante" de antes no era por la escala del mapa, sino porque
+         la altura de la camara se quedaba fija en 1.6 m reales: ahora la altura del ojo
+         tambien se achica con la escala (ver "camaraInicio" mas abajo en el codigo).
+         Para probar a tamaño real: escala: 1, o agregar ?escala=1 en la direccion. -->
+    <a-entity id="mapa" norte-maps="escala: 0.2"></a-entity>
 
     <!-- CAMARA: es el "ojo" del visitante. Su posicion inicial la calcula norte-maps (junto al gimnasio).
          near: 0.1 -> lo mas cercano que se dibuja; mejora la nitidez del suelo a lo lejos.
