@@ -431,7 +431,7 @@
               class: p.audio ? 'clickable' : ''
             }, marca);
             altoCartel = 5.2;
-            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 20 * escala);   // 20 m reales al sur del gimnasio
+            camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 32 * escala);   // 32 m reales al sur del gimnasio (mas lejos para no arrancar pegado a un edificio a escala 1:1)
             if (p.audio) {
               marca.setAttribute('punto-audio', 'src: #audio-' + p.audio + '; clics: ' + (p.clics || 3) + '; id: ' + p.fragmento);
             }
@@ -447,21 +447,25 @@
             // si el punto tiene relato grabado (p.audio): se marca con un CASSETTE (caja + 2 carretes),
             // no con una esfera generica -- asi se lee claramente como "esto se recolecta".
             // Si no tiene audio, sigue siendo el palo + esfera naranja de siempre.
-            crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
             if (p.audio) {
-              var cassette = crear('a-entity', { position: '0 2.5 0' }, marca);
+              // una mesita baja (0.5 m, altura real de mesa) con el cassette encima -- a tamaño real
+              // de cassette, no gigante. Reemplaza el palo alto: mucho mejor para recorrer a escala 1:1.
+              crear('a-box', { width: 0.4, height: 0.5, depth: 0.4, position: '0 0.25 0', color: '#9C7A54' }, marca);
+              var cassette = crear('a-entity', { position: '0 0.53 0' }, marca);
               crear('a-box', {
-                width: 0.5, height: 0.32, depth: 0.1, color: '#3B8FA8', class: 'clickable'
+                width: 0.18, height: 0.03, depth: 0.11, color: '#3B8FA8', class: 'clickable'
               }, cassette);
               crear('a-cylinder', {
-                radius: 0.09, height: 0.11, position: '-0.13 0 0.06', rotation: '90 0 0', color: '#222',
+                radius: 0.028, height: 0.034, position: '-0.045 0.02 0', color: '#222',
                 'segments-radial': 10, class: 'clickable'
               }, cassette);
               crear('a-cylinder', {
-                radius: 0.09, height: 0.11, position: '0.13 0 0.06', rotation: '90 0 0', color: '#222',
+                radius: 0.028, height: 0.034, position: '0.045 0.02 0', color: '#222',
                 'segments-radial': 10, class: 'clickable'
               }, cassette);
+              altoCartel = 0.95;   // el cartel ahora va justo sobre la mesita, no en lo alto de un palo
             } else {
+              crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
               crear('a-sphere', {
                 radius: 0.28, position: '0 2.5 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
                 material: 'color: #E8743B; emissive: #E8743B; emissiveIntensity: 0.4'
@@ -544,9 +548,11 @@
   <div id="hud"></div>
 
   <!-- Contador de recoleccion: cuantos "cassettes" ya se sacaron del mapa.
-       Se actualiza solo (evento norte-maps:recoleccion) cada vez que recolectas uno. -->
+       Se actualiza solo (evento norte-maps:recoleccion) cada vez que recolectas uno.
+       Va arriba a la DERECHA (no arriba a la izquierda) para no toparse con el panel
+       de estadisticas de A-Frame (stats="fps/triangulos"), que ocupa esa esquina. -->
   <div id="contador-recoleccion"
-    style="position:fixed; left:12px; top:12px; z-index:10; font:13px system-ui, sans-serif;
+    style="position:fixed; right:12px; top:12px; z-index:10; font:13px system-ui, sans-serif;
            padding:6px 12px; border-radius:6px; background:rgba(255,255,255,0.85); color:#222;"></div>
 
   <!-- Boton para ver el documental (video externo embebido via YouTube, no alojado aqui:
@@ -614,8 +620,10 @@
       <img id="frag-locomocion" src="activos/mural/locomocion.jpg">
     </a-assets>
 
-    <!-- EL BARRIO. Para cambiar la escala: escala: 0.2 (1:5)  ->  escala: 1 (tamaño real) -->
-    <a-entity id="mapa" norte-maps="escala: 0.2"></a-entity>
+    <!-- EL BARRIO, a tamaño real (1:1): asi la sensacion de recorrido es la correcta (caminar
+         metro a metro), en vez de sentirse "gigante" como pasaba a escala 0.2 (1:5).
+         Para volver a la escala reducida: escala: 0.2, o agregar ?escala=0.2 en la direccion. -->
+    <a-entity id="mapa" norte-maps="escala: 1"></a-entity>
 
     <!-- CAMARA: es el "ojo" del visitante. Su posicion inicial la calcula norte-maps (junto al gimnasio).
          near: 0.1 -> lo mas cercano que se dibuja; mejora la nitidez del suelo a lo lejos.
