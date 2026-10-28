@@ -29,6 +29,29 @@
     // escribiendo su nombre como atributo (ej: radio-audio="...").
     // ============================================================
 
+    // ---------- 0) punto-audio ----------
+    // Version generica de la interaccion de audio, para cualquier punto del mapa
+    // que tenga un relato grabado (ver campo "audio" en norte-maps-datos.js).
+    // Al hacer clic en el marcador (palo + esfera) reproduce / pausa su audio.
+    AFRAME.registerComponent('punto-audio', {
+      schema: { src: { type: 'selector' } },
+      init: function () {
+        var audio = this.data.src;
+        var el = this.el;
+        if (!audio) return;
+        el.classList.add('clickable');
+        el.addEventListener('click', function () {
+          if (audio.paused) {
+            audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
+          } else {
+            audio.pause();
+          }
+        });
+        el.addEventListener('mouseenter', function () { el.sceneEl.canvas.style.cursor = 'pointer'; });
+        el.addEventListener('mouseleave', function () { el.sceneEl.canvas.style.cursor = ''; });
+      }
+    });
+
     // ---------- 1) radio-audio (igual que en la version anterior) ----------
     // Al hacer clic sobre la radio reproduce / pausa el audio y enciende
     // o apaga su luz roja (la pieza del modelo llamada "indicador").
@@ -315,27 +338,36 @@
             }, marca);
             altoCartel = 5.2;
             camaraInicio = new THREE.Vector3(q.x, 1.6, q.y + 20 * escala);   // 20 m reales al sur del gimnasio
+            if (p.audio) {
+              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio);
+            }
           } else if (p.tipo === 'radio') {
             // la radio 3D sobre un pedestal; hace clic para escuchar
             radioPos = q;
             crear('a-box', { width: 0.6, height: 1, depth: 0.5, position: '0 0.5 0', color: '#9C7A54' }, marca);
             marca.radio = crear('a-entity', {
-              class: 'clickable', 'gltf-model': '#radio', 'radio-audio': 'src: #audio-relato',
+              class: 'clickable', 'gltf-model': '#radio', 'radio-audio': 'src: #audio-' + (p.audio || 'radio'),
               position: '0 1 0', scale: '2 2 2'
             }, marca);
             altoCartel = 2.6;
           } else {
             // un punto cualquiera: palo + esfera de color
             // (segments-radial / segments-width: cuantos lados tiene la figura; menos lados = menos triangulos)
+            // si el punto tiene relato grabado (p.audio), la esfera se pinta celeste y queda clickeable
+            var colorPunto = p.audio ? '#3B8FA8' : '#E8743B';
             crear('a-cylinder', { radius: 0.06, height: 2.4, position: '0 1.2 0', color: '#444444', 'segments-radial': 6, 'segments-height': 1 }, marca);
             crear('a-sphere', {
-              radius: 0.28, position: '0 2.5 0', color: '#E8743B', 'segments-width': 12, 'segments-height': 8,
-              material: 'color: #E8743B; emissive: #E8743B; emissiveIntensity: 0.4'
+              radius: 0.28, position: '0 2.5 0', color: colorPunto, 'segments-width': 12, 'segments-height': 8,
+              material: 'color: ' + colorPunto + '; emissive: ' + colorPunto + '; emissiveIntensity: 0.4'
             }, marca);
+            if (p.audio) {
+              marca.setAttribute('punto-audio', 'src: #audio-' + p.audio);
+            }
           }
 
           // cartel con el nombre (siempre mirando al visitante)
-          var texto = p.tipo === 'radio' ? p.nombre + ' (clic para escuchar)' : p.nombre;
+          var sufijoAudio = (p.audio && p.tipo !== 'radio') ? ' (clic para escuchar)' : '';
+          var texto = p.tipo === 'radio' ? p.nombre + ' (clic para escuchar)' : p.nombre + sufijoAudio;
           crear('a-entity', {
             text: 'value: ' + texto + '; align: center; anchor: center; color: #222222; width: 8',
             position: '0 ' + altoCartel + ' 0',
@@ -404,6 +436,37 @@
 <body>
   <div id="hud"></div>
 
+  <!-- Boton para ver el documental (video externo embebido via YouTube, no alojado aqui:
+       el original pesa ~2GB, asi que se reproduce desde la fuente externa). -->
+  <button id="boton-documental"
+    style="position:fixed; right:12px; bottom:12px; z-index:10; font:13px system-ui, sans-serif;
+           padding:8px 14px; border-radius:6px; border:0; background:#222; color:#fff; cursor:pointer;">
+    ▶ Ver documental
+  </button>
+
+  <div id="modal-documental"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:20;
+           align-items:center; justify-content:center;">
+    <div style="position:relative; width:90%; max-width:800px; aspect-ratio:16/9;">
+      <iframe id="iframe-documental" src="" title="Documental Norte Maps"
+        style="width:100%; height:100%; border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+      <button id="cerrar-documental"
+        style="position:absolute; top:-36px; right:0; font:13px system-ui, sans-serif;
+               padding:4px 10px; border-radius:4px; border:0; background:#fff; cursor:pointer;">Cerrar ✕</button>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('boton-documental').addEventListener('click', function () {
+      document.getElementById('iframe-documental').src = 'https://www.youtube.com/embed/S1ep6XOCqaQ?autoplay=1';
+      document.getElementById('modal-documental').style.display = 'flex';
+    });
+    document.getElementById('cerrar-documental').addEventListener('click', function () {
+      document.getElementById('modal-documental').style.display = 'none';
+      document.getElementById('iframe-documental').src = '';
+    });
+  </script>
+
   <!-- ESCENA
        stats                            -> panel de rendimiento (fps, triangulos)
        background                       -> color de fondo (en vez de un cielo, que pesa mas)
@@ -412,11 +475,18 @@
        (la niebla la pone el componente norte-maps segun la escala) -->
   <a-scene stats background="color: #ECECEC" cursor="rayOrigin: mouse" raycaster="objects: .clickable">
 
-    <!-- ARCHIVOS QUE SE CARGAN (modelo 3D de la radio y su audio) -->
+    <!-- ARCHIVOS QUE SE CARGAN (modelo 3D de la radio y los relatos en audio) -->
     <a-assets>
       <a-asset-item id="radio" src="activos/radio.glb"></a-asset-item>
-      <!-- Audio de prueba: reemplazar por el audio de un relato de la Cooperativa -->
-      <audio id="audio-relato" src="activos/audio-prueba.wav" preload="auto" loop></audio>
+      <!-- Relatos reales grabados por la Cooperativa (mismos audios publicados en su Spotify) -->
+      <audio id="audio-gimnasio" src="activos/gimnasio.mp3" preload="auto"></audio>
+      <audio id="audio-radio" src="activos/radio.mp3" preload="auto"></audio>
+      <audio id="audio-cecof" src="activos/cecof.mp3" preload="auto"></audio>
+      <audio id="audio-comida-rapida" src="activos/comida-rapida.mp3" preload="auto"></audio>
+      <audio id="audio-perritos" src="activos/perritos.mp3" preload="auto"></audio>
+      <audio id="audio-cancha" src="activos/cancha.mp3" preload="auto"></audio>
+      <audio id="audio-locomocion" src="activos/locomocion.mp3" preload="auto"></audio>
+      <audio id="audio-huerta" src="activos/huerta.mp3" preload="auto"></audio>
     </a-assets>
 
     <!-- EL BARRIO. Para cambiar la escala: escala: 0.2 (1:5)  ->  escala: 1 (tamaño real) -->
