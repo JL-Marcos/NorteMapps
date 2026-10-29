@@ -383,23 +383,23 @@
           if (!e.real && !mostrarRelleno) return;
           var contorno = e.pts.map(function (p) { return aEscena(p[0], p[1]); });
           var alto = e.alto * escala * exagera;
-          // Colision SOLO contra edificios reales (OpenStreetMap). Las 500+ casas de relleno
-          // son inventadas para dar densidad visual, estan muy juntas y a veces se superponen
-          // entre si -- usarlas para colision generaba un "arrastre" raro de la camara (varios
-          // circulos empujando en cadena). No son reales: no tiene sentido chocar contra ellas.
-          if (e.real) {
-            var cx = 0, cz = 0;
-            contorno.forEach(function (p) { cx += p.x; cz += p.y; });
-            cx /= contorno.length; cz /= contorno.length;
-            var radioEdif = 0;
-            contorno.forEach(function (p) { radioEdif = Math.max(radioEdif, Math.hypot(p.x - cx, p.y - cz)); });
-            // Tope de 6 m reales: algun edificio real del dataset (OpenStreetMap, probablemente
-            // una manzana completa u otro poligono irregular) daba un circulo de colision
-            // gigante (~23 m de radio) que tapaba toda la zona del gimnasio/CECOF. Un circulo
-            // de 6 m es de sobra para un edificio comun y evita esos casos raros.
-            radioEdif = Math.min(radioEdif, 6 * escala);
-            colisionesEdificios.push({ x: cx, z: cz, radio: radioEdif + 0.3 * escala });
-          }
+          // Colision contra TODOS los edificios (reales Y de relleno -- las casas de relleno
+          // tambien tienen que sentirse solidas, no son solo decoracion). El "arrastre" raro
+          // que daba esto antes no era por incluir relleno: era por 1) resolver varios
+          // circulos superpuestos en el mismo cuadro (ver resolverColisiones mas abajo,
+          // ya arreglado: resuelve solo el de mayor penetracion por cuadro) y 2) un edificio
+          // real con poligono irregular que daba un circulo gigante (ver el tope de abajo).
+          var cx = 0, cz = 0;
+          contorno.forEach(function (p) { cx += p.x; cz += p.y; });
+          cx /= contorno.length; cz /= contorno.length;
+          var radioEdif = 0;
+          contorno.forEach(function (p) { radioEdif = Math.max(radioEdif, Math.hypot(p.x - cx, p.y - cz)); });
+          // Tope de 6 m reales: algun edificio del dataset (probablemente una manzana completa
+          // u otro poligono irregular) daba un circulo de colision gigante (~23 m de radio) que
+          // tapaba toda la zona del gimnasio/CECOF. Un circulo de 6 m es de sobra para una casa
+          // o edificio comun y evita esos casos raros.
+          radioEdif = Math.min(radioEdif, 6 * escala);
+          colisionesEdificios.push({ x: cx, z: cz, radio: radioEdif + 0.3 * escala });
           // un poco de variacion de tono entre un edificio y otro (sin azar real: depende del numero de edificio)
           var techo = (e.real ? colorReal : colorRelleno).clone();
           techo.offsetHSL(0, 0, (((k * 37) % 11) / 11 - 0.5) * 0.06);
