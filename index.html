@@ -24,13 +24,20 @@
     #ctl-tactil { position: fixed; right: 12px; bottom: 76px; z-index: 10; display: none; flex-direction: column; gap: 10px; }
     body.tactil #ctl-tactil { display: flex; }
     body.tactil .rs-base { display: none !important; }   /* panel de estadisticas: oculto en telefono (en PC se ve) */
+    /* Joystick virtual (abajo a la izquierda, sobre la pestana de ayuda) y boton de correr (abajo a la derecha) */
+    #joy { position: fixed; left: 20px; bottom: 64px; z-index: 10; width: 128px; height: 128px; border-radius: 50%; display: none;
+           background: rgba(0,0,0,0.30); border: 2px solid rgba(255,255,255,0.45); touch-action: none; user-select: none; -webkit-user-select: none; }
+    body.tactil #joy { display: block; }
+    #joy-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+                background: rgba(255,255,255,0.80); box-shadow: 0 1px 6px rgba(0,0,0,0.4); pointer-events: none; }
+    #joy.activo { background: rgba(59,143,168,0.40); }
     .ctl-btn { width: 56px; height: 56px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.55); color: #fff;
                font: 22px system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     .ctl-btn.activo { background: rgba(59,143,168,0.9); }
     #aviso { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 15; display: none; max-width: 80vw;
              background: rgba(30,120,60,0.95); color: #fff; padding: 10px 16px; border-radius: 8px; font: 14px system-ui, sans-serif; text-align: center; }
     @media (max-width: 520px) { #contador-recoleccion .txt-largo { display: none; } }
-    @media (max-height: 480px) { #minimapa { width: 100px; height: 100px; } .ctl-btn { width: 50px; height: 50px; } }
+    @media (max-height: 480px) { #minimapa { width: 100px; height: 100px; } #joy { width: 104px; height: 104px; bottom: 58px; } .ctl-btn { width: 50px; height: 50px; } }
   </style>
 
   <script>
@@ -80,7 +87,7 @@
     // wasd-controls solo lee el teclado: en un telefono no hay como avanzar. Los botones de pantalla (▲ ▼ ⏩)
     // fijan AVANCE; el componente norte-maps lo lee en cada cuadro (tick) y mueve la camara hacia donde mira.
     var ES_TACTIL = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window) || new URLSearchParams(location.search).get('tactil') === '1';
-    var AVANCE = { v: 0, rapido: false };
+    var AVANCE = { x: 0, y: 0, rapido: false };   // x: lateral (+ derecha), y: avance (+ adelante), de -1 a 1; lo fija el joystick
 
     // ---------- 0c) mision secundaria: basura ----------
     // 5 montones de basura (las X rojas del mapa). Se recogen con un clic (quedan "llevando", en una bolsa en la mano)
@@ -184,13 +191,26 @@
     window.addEventListener('load', function () {
       // controles tactiles
       if (ES_TACTIL) document.body.classList.add('tactil');
-      [['ctl-avanzar', 1, false], ['ctl-rapido', 1, true], ['ctl-retroceder', -1, false]].forEach(function (c) {
-        var b = document.getElementById(c[0]); if (!b) return;
-        function soltar() { AVANCE.v = 0; AVANCE.rapido = false; b.classList.remove('activo'); }
-        b.addEventListener('pointerdown', function (e) { e.preventDefault(); AVANCE.v = c[1]; AVANCE.rapido = c[2]; b.classList.add('activo'); });
-        ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { b.addEventListener(ev, soltar); });
-        b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-      });
+      // joystick: arrastrar la perilla desde el centro; hacia arriba = adelante, a los lados = lateral
+      var joy = document.getElementById('joy'), knob = document.getElementById('joy-knob'), joyId = null;
+      function joyMover(e) {
+        var r = joy.getBoundingClientRect(), R = r.width / 2, dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R);
+        var d = Math.hypot(dx, dy), max = R * 0.62;
+        if (d > max) { dx = dx / d * max; dy = dy / d * max; }
+        knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+        var mx = dx / max, my = -dy / max, m = Math.hypot(mx, my);
+        if (m < 0.12) { AVANCE.x = 0; AVANCE.y = 0; } else { AVANCE.x = mx; AVANCE.y = my; }   // zona muerta central
+      }
+      function joySoltar() { joyId = null; AVANCE.x = 0; AVANCE.y = 0; knob.style.transform = ''; joy.classList.remove('activo'); }
+      if (joy) {
+        joy.addEventListener('pointerdown', function (e) { e.preventDefault(); joyId = e.pointerId; try { joy.setPointerCapture(joyId); } catch (_) {} joy.classList.add('activo'); joyMover(e); });
+        joy.addEventListener('pointermove', function (e) { if (e.pointerId === joyId) { e.preventDefault(); joyMover(e); } });
+        ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (ev) { joy.addEventListener(ev, function (e) { if (e.pointerId === joyId || ev !== 'pointerup') joySoltar(); }); });
+        joy.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      }
+      // correr: boton que se enciende y se apaga (no hace falta mantenerlo: el pulgar queda libre para el joystick)
+      var br = document.getElementById('ctl-rapido');
+      if (br) br.addEventListener('click', function () { AVANCE.rapido = !AVANCE.rapido; br.classList.toggle('activo', AVANCE.rapido); });
       // ayuda plegable: abierta en computador, cerrada en telefono
       var hud = document.getElementById('hud'), hb = document.getElementById('hud-boton');
       function pintarHb() { hb.textContent = hud.classList.contains('abierto') ? '✕ Ayuda' : '? Ayuda'; }
@@ -1513,7 +1533,7 @@
         var linea2 = distanciaEscena === null ? '' : '<br>Estas a ' + Math.round(distanciaEscena / esc) + ' m reales del gimnasio';
         this.hud.innerHTML = linea1 + linea2 +
           (ES_TACTIL
-            ? '<br>Botones ▲ ▼ para caminar (⏩ rápido) · arrastra el dedo o gira el teléfono para mirar · toca cassettes, puertas y basura'
+            ? '<br>Joystick para caminar (⏩ = rápido) · arrastra el dedo o gira el teléfono para mirar · toca cassettes, puertas y basura'
             : '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar · clic en cassettes, puertas y basura' +
               '<br>Otra escala: agregar <b>?escala=1</b> a la direccion') +
           '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
@@ -1570,14 +1590,16 @@
       // (no hace falta redibujar en cada cuadro); la colision, en cambio, se revisa siempre.
       tick: function (t, dt) {
         if (!this.camara) return;
-        if (AVANCE.v) {   // caminar con los botones tactiles: hacia donde mira la camara, en horizontal
+        if (AVANCE.x || AVANCE.y) {   // caminar con el joystick: adelante/atras y lateral, relativo a hacia donde mira la camara
           var camT = this.camara, dirT = this._dirT || (this._dirT = new THREE.Vector3());
-          camT.object3D.getWorldDirection(dirT); dirT.y = 0;
+          camT.object3D.getWorldDirection(dirT); dirT.y = 0;   // getWorldDirection apunta hacia atras de la camara
           if (dirT.lengthSq() > 1e-6) {
             dirT.normalize();
             var enSalaT = camT.object3D.position.x > 200;   // dentro de las salas, mas lento
-            var velT = (AVANCE.rapido ? 3.0 : 0.9) * (enSalaT ? 0.4 : 1) * AVANCE.v * Math.min(dt || 16, 100) / 1000;
-            camT.object3D.position.x -= dirT.x * velT; camT.object3D.position.z -= dirT.z * velT;
+            var velT = (AVANCE.rapido ? 3.0 : 0.9) * (enSalaT ? 0.4 : 1) * Math.min(dt || 16, 100) / 1000;
+            var fx = -dirT.x, fz = -dirT.z;                  // hacia adelante
+            camT.object3D.position.x += (fx * AVANCE.y - fz * AVANCE.x) * velT;   // derecha = (-fz, fx)
+            camT.object3D.position.z += (fz * AVANCE.y + fx * AVANCE.x) * velT;
           }
         }
         this.resolverColisiones();
@@ -1622,10 +1644,9 @@
   </button>
 
   <!-- Controles tactiles (solo se ven en telefono/tablet): caminar mientras se mantienen presionados -->
+  <div id="joy" aria-label="Joystick para caminar"><div id="joy-knob"></div></div>
   <div id="ctl-tactil">
-    <button class="ctl-btn" id="ctl-rapido" aria-label="Avanzar rápido">⏩</button>
-    <button class="ctl-btn" id="ctl-avanzar" aria-label="Avanzar">▲</button>
-    <button class="ctl-btn" id="ctl-retroceder" aria-label="Retroceder">▼</button>
+    <button class="ctl-btn" id="ctl-rapido" aria-label="Correr (activar o desactivar)">⏩</button>
   </div>
 
   <div id="aviso"></div>
