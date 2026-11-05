@@ -13,13 +13,24 @@
   <script src="activos/norte-maps-datos.js"></script>
 
   <style>
-    /* Cartelito de ayuda abajo a la izquierda (es HTML normal, no esta dentro de la escena 3D) */
-    #hud {
-      position: fixed; left: 12px; bottom: 12px; z-index: 10; max-width: 340px;
-      font: 13px/1.4 system-ui, sans-serif; color: #222;
-      background: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px;
-      pointer-events: none;
-    }
+    /* Ayuda: una pestana "? Ayuda" abajo a la izquierda que se despliega y se guarda (HTML normal, fuera de la escena 3D) */
+    #hud { position: fixed; left: 12px; bottom: 12px; z-index: 10; font: 13px/1.4 system-ui, sans-serif; color: #222; }
+    #hud-boton { display: block; font: 12px system-ui, sans-serif; padding: 6px 10px; border: 0; border-radius: 6px;
+                 background: rgba(0,0,0,0.55); color: #fff; cursor: pointer; }
+    #hud-cuerpo { display: none; margin-bottom: 6px; max-width: min(340px, 72vw); background: rgba(255,255,255,0.88);
+                  padding: 8px 12px; border-radius: 6px; pointer-events: none; }
+    #hud.abierto #hud-cuerpo { display: block; }
+    /* Controles tactiles: solo aparecen en dispositivos tactiles (clase "tactil" en <body>) */
+    #ctl-tactil { position: fixed; right: 12px; bottom: 76px; z-index: 10; display: none; flex-direction: column; gap: 10px; }
+    body.tactil #ctl-tactil { display: flex; }
+    body.tactil .rs-base { display: none !important; }   /* panel de estadisticas: oculto en telefono (en PC se ve) */
+    .ctl-btn { width: 56px; height: 56px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.55); color: #fff;
+               font: 22px system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+    .ctl-btn.activo { background: rgba(59,143,168,0.9); }
+    #aviso { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 15; display: none; max-width: 80vw;
+             background: rgba(30,120,60,0.95); color: #fff; padding: 10px 16px; border-radius: 8px; font: 14px system-ui, sans-serif; text-align: center; }
+    @media (max-width: 520px) { #contador-recoleccion .txt-largo { display: none; } }
+    @media (max-height: 480px) { #minimapa { width: 100px; height: 100px; } .ctl-btn { width: 50px; height: 50px; } }
   </style>
 
   <script>
@@ -65,9 +76,56 @@
     // siempre disponible desde el principio (no hay que recolectarlo).
     if (!estaRecolectado('radio')) { localStorage.setItem('norte-maps-recolectado-radio', '1'); }
 
+    // ---------- 0b) dispositivo tactil y caminar con botones ----------
+    // wasd-controls solo lee el teclado: en un telefono no hay como avanzar. Los botones de pantalla (▲ ▼ ⏩)
+    // fijan AVANCE; el componente norte-maps lo lee en cada cuadro (tick) y mueve la camara hacia donde mira.
+    var ES_TACTIL = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window) || new URLSearchParams(location.search).get('tactil') === '1';
+    var AVANCE = { v: 0, rapido: false };
+
+    // ---------- 0c) mision secundaria: basura ----------
+    // 5 montones de basura (las X rojas del mapa). Se recogen con un clic (quedan "llevando", en una bolsa en la mano)
+    // y se depositan en un contenedor verde (los tickets verdes del mapa). Con todo depositado se desbloquea el videoclip.
+    var TOTAL_BASURA = (window.NORTE_MAPS.reciclaje || []).filter(function (r) { return r.tipo === 'basural'; }).length;
+    var URL_VIDEOCLIP = 'https://www.youtube.com/embed/nb0cvkEZ2zg?start=567&autoplay=1&rel=0';   // NORTE FLOW, desde 9:27
+    function basuraLlevada(i) { return localStorage.getItem('norte-maps-basura-llevando-' + i) === '1'; }
+    function basuraDepositada(i) { return localStorage.getItem('norte-maps-basura-depositada-' + i) === '1'; }
+    function contenedorUsado(j) { return localStorage.getItem('norte-maps-contenedor-usado-' + j) === '1'; }
+    function contarBasuraLlevando() { var n = 0; for (var i = 0; i < TOTAL_BASURA; i++) if (basuraLlevada(i) && !basuraDepositada(i)) n++; return n; }
+    function contarBasuraDepositada() { var n = 0; for (var i = 0; i < TOTAL_BASURA; i++) if (basuraDepositada(i)) n++; return n; }
+    function mostrarAviso(texto) {
+      var a = document.getElementById('aviso'); if (!a) return;
+      a.textContent = texto; a.style.display = 'block';
+      setTimeout(function () { a.style.display = 'none'; }, 7000);
+    }
+    function depositarBasura() {
+      var antes = contarBasuraDepositada(), n = 0;
+      for (var i = 0; i < TOTAL_BASURA; i++) {
+        if (basuraLlevada(i) && !basuraDepositada(i)) {
+          localStorage.removeItem('norte-maps-basura-llevando-' + i);
+          localStorage.setItem('norte-maps-basura-depositada-' + i, '1'); n++;
+        }
+      }
+      window.dispatchEvent(new CustomEvent('norte-maps:basura'));
+      if (n && antes < TOTAL_BASURA && contarBasuraDepositada() === TOTAL_BASURA) {
+        mostrarAviso('¡Barrio limpio! Se desbloqueó el videoclip de los niños: míralo en la pantalla de la cancha, detrás del gimnasio.');
+      }
+      return n;
+    }
+    function abrirVideoclip() {
+      pausarOtrosAudios('');
+      document.getElementById('iframe-documental').title = 'Videoclip NORTE FLOW';
+      document.getElementById('iframe-documental').src = URL_VIDEOCLIP;
+      document.getElementById('modal-documental').style.display = 'flex';
+    }
+    function actualizarVideoclip() {
+      var b = document.getElementById('boton-videoclip');
+      if (b) b.style.display = (TOTAL_BASURA > 0 && contarBasuraDepositada() === TOTAL_BASURA) ? 'block' : 'none';
+    }
+
     function actualizarContador() {
       var el = document.getElementById('contador-recoleccion');
-      if (el) el.textContent = '🎞️ ' + contarRecolectados() + ' / ' + TOTAL_FRAGMENTOS + ' relatos recolectados';
+      if (el) el.innerHTML = '🎞️ ' + contarRecolectados() + ' / ' + TOTAL_FRAGMENTOS + '<span class="txt-largo"> relatos</span>' +
+        (TOTAL_BASURA ? ' · 🗑️ ' + contarBasuraDepositada() + ' / ' + TOTAL_BASURA + '<span class="txt-largo"> basura</span>' : '');
     }
     function actualizarMano() {
       var n = contarLlevando();
@@ -75,6 +133,11 @@
       if (mano) mano.setAttribute('visible', n > 0);
       var texto = document.getElementById('texto-mano');
       if (texto) texto.setAttribute('text', 'value', n > 0 ? ('x' + n) : '');
+      var nb = contarBasuraLlevando();
+      var bolsa = document.getElementById('mano-basura');
+      if (bolsa) bolsa.setAttribute('visible', nb > 0);
+      var textoB = document.getElementById('texto-basura');
+      if (textoB) textoB.setAttribute('text', 'value', nb > 0 ? ('x' + nb) : '');
     }
     // Solo un audio suena a la vez (pausa cualquier otro que estuviera sonando).
     function pausarOtrosAudios(exceptoId) {
@@ -113,6 +176,39 @@
     window.addEventListener('norte-maps:recoleccion', actualizarContador);
     window.addEventListener('norte-maps:recoleccion', refrescarRaycaster);
     window.addEventListener('norte-maps:llevando-cambio', actualizarMano);
+    window.addEventListener('norte-maps:basura', actualizarContador);
+    window.addEventListener('norte-maps:basura', actualizarMano);
+    window.addEventListener('norte-maps:basura', actualizarVideoclip);
+    window.addEventListener('norte-maps:basura', refrescarRaycaster);
+    window.addEventListener('load', actualizarVideoclip);
+    window.addEventListener('load', function () {
+      // controles tactiles
+      if (ES_TACTIL) document.body.classList.add('tactil');
+      [['ctl-avanzar', 1, false], ['ctl-rapido', 1, true], ['ctl-retroceder', -1, false]].forEach(function (c) {
+        var b = document.getElementById(c[0]); if (!b) return;
+        function soltar() { AVANCE.v = 0; AVANCE.rapido = false; b.classList.remove('activo'); }
+        b.addEventListener('pointerdown', function (e) { e.preventDefault(); AVANCE.v = c[1]; AVANCE.rapido = c[2]; b.classList.add('activo'); });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { b.addEventListener(ev, soltar); });
+        b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      });
+      // ayuda plegable: abierta en computador, cerrada en telefono
+      var hud = document.getElementById('hud'), hb = document.getElementById('hud-boton');
+      function pintarHb() { hb.textContent = hud.classList.contains('abierto') ? '✕ Ayuda' : '? Ayuda'; }
+      if (!ES_TACTIL) hud.classList.add('abierto');
+      pintarHb();
+      hb.addEventListener('click', function () {
+        hud.classList.toggle('abierto'); pintarHb();
+        var m = document.getElementById('mapa').components['norte-maps']; if (m && hud.classList.contains('abierto')) m.escribirHud(null);
+      });
+      // videoclip
+      var bv = document.getElementById('boton-videoclip');
+      if (bv) bv.addEventListener('click', function () {
+        pausarOtrosAudios('');
+        document.getElementById('iframe-documental').title = 'Videoclip NORTE FLOW';
+        document.getElementById('iframe-documental').src = URL_VIDEOCLIP;
+        document.getElementById('modal-documental').style.display = 'flex';
+      });
+    });
     window.addEventListener('load', actualizarContador);
     window.addEventListener('load', actualizarMano);
 
@@ -415,6 +511,24 @@
         var posE = [], colE = [], idxE = [];
         var colorReal = new THREE.Color('#F6E7C8'), colorRelleno = new THREE.Color('#E6E2D8');
         var nReal = 0, nRelleno = 0;
+        // Colores de casa (paletas inspiradas en las fotos del barrio: madera, pintura lisa, techos de zinc). El color de
+        // cada edificio se elige "al azar" pero repetible (depende de su numero), asi no cambia entre cargas.
+        var PAREDES = ['#B98A5E', '#8C5A3C', '#E4E0D4', '#C86B5C', '#D9B95A', '#7F9DB5', '#8DAA8A', '#C9A0A8', '#A9A396', '#6F8FA8', '#9C7A5A'];
+        var TECHOS = ['#7C7F82', '#8C4A3E', '#5E6B5A', '#4F5A66', '#9A9690'];
+        function rngK(k) { var s = ((k + 1) * 2654435761) % 2147483647 || 1; return function () { s = (s * 16807) % 2147483647; return s / 2147483647; }; }
+        // segmentos de calle (unidades de escena) para saber hacia donde mira cada casa
+        var segsCalles = [];
+        datos.calles.forEach(function (c) {
+          var pp = c.pts.map(function (q) { return aEscena(q[0], q[1]); });
+          for (var i = 0; i < pp.length - 1; i++) segsCalles.push([pp[i].x, pp[i].y, pp[i + 1].x, pp[i + 1].y]);
+        });
+        // un rectangulo vertical pegado a una pared (ventana o puerta): centro (cx,cz), eje u a lo largo de la pared, normal n hacia afuera
+        function cuadroPared(cx, cz, ux, uz, nx, nz, ancho, y0, y1, color) {
+          var off = 0.05 * escala, hw = ancho / 2, v = posE.length / 3, col = new THREE.Color(color);
+          var xs = [cx - ux * hw, cx + ux * hw, cx + ux * hw, cx - ux * hw], zs = [cz - uz * hw, cz + uz * hw, cz + uz * hw, cz - uz * hw], ys = [y0, y0, y1, y1];
+          for (var i = 0; i < 4; i++) { posE.push(xs[i] + nx * off, ys[i], zs[i] + nz * off); colE.push(col.r, col.g, col.b); }
+          idxE.push(v, v + 1, v + 2, v, v + 2, v + 3);
+        }
         var colisionesEdificios = [];   // circulo (centro+radio) por edificio, para no poder atravesarlo caminando
         this.colisionesEdificios = colisionesEdificios;
         (datos.edificios || []).forEach(function (e, k) {
@@ -448,9 +562,11 @@
           radioEdif = Math.min(radioEdif, 6 * escala);
           colisionesEdificios.push({ x: cx, z: cz, radio: radioEdif + 0.3 * escala });
           // un poco de variacion de tono entre un edificio y otro (sin azar real: depende del numero de edificio)
-          var techo = (e.real ? colorReal : colorRelleno).clone();
-          techo.offsetHSL(0, 0, (((k * 37) % 11) / 11 - 0.5) * 0.06);
-          var pared = techo.clone().multiplyScalar(0.9);
+          var rk = rngK(k);
+          var pared = new THREE.Color(PAREDES[Math.floor(rk() * PAREDES.length)]);
+          pared.offsetHSL((rk() - 0.5) * 0.02, (rk() - 0.5) * 0.08, (rk() - 0.5) * 0.08);
+          var techo = new THREE.Color(TECHOS[Math.floor(rk() * TECHOS.length)]);
+          techo.offsetHSL(0, 0, (rk() - 0.5) * 0.06);
           if (e.real) nReal++; else nRelleno++;
 
           // techo
@@ -466,6 +582,39 @@
             posE.push(a.x, 0, a.y, b.x, 0, b.y, b.x, alto, b.y, a.x, alto, a.y);
             for (var c = 0; c < 4; c++) colE.push(pared.r, pared.g, pared.b);
             idxE.push(v, v + 1, v + 2, v, v + 2, v + 3);
+          }
+          // ventanas y puerta en la pared que mira a la calle mas cercana
+          if (contorno.length >= 3 && segsCalles.length) {
+            var area2 = 0;
+            for (var q1 = 0; q1 < contorno.length; q1++) { var pa = contorno[q1], pb = contorno[(q1 + 1) % contorno.length]; area2 += pa.x * pb.y - pb.x * pa.y; }
+            var signo = area2 > 0 ? 1 : -1;
+            var mejorD = Infinity, cxC = 0, czC = 0;
+            for (var s1 = 0; s1 < segsCalles.length; s1++) {
+              var sg = segsCalles[s1], sx = sg[2] - sg[0], sz = sg[3] - sg[1], l2 = sx * sx + sz * sz;
+              var tt = l2 ? Math.max(0, Math.min(1, ((cx - sg[0]) * sx + (cz - sg[1]) * sz) / l2)) : 0;
+              var qx = sg[0] + tt * sx, qz = sg[1] + tt * sz, dd = Math.hypot(cx - qx, cz - qz);
+              if (dd < mejorD) { mejorD = dd; cxC = qx; czC = qz; }
+            }
+            if (mejorD > 0.001 && mejorD < 60 * escala) {
+              var dcx = (cxC - cx) / mejorD, dcz = (czC - cz) / mejorD, mejorE = -1, mejorDot = 0.2;
+              for (var e1 = 0; e1 < contorno.length; e1++) {
+                var ea = contorno[e1], eb = contorno[(e1 + 1) % contorno.length], ex = eb.x - ea.x, ez = eb.y - ea.y, eL = Math.hypot(ex, ez);
+                if (eL < 3 * escala) continue;
+                var dot = (signo * ez / eL) * dcx + (-signo * ex / eL) * dcz;   // normal hacia afuera . direccion a la calle
+                if (dot > mejorDot) { mejorDot = dot; mejorE = e1; }
+              }
+              if (mejorE >= 0) {
+                var wa = contorno[mejorE], wb = contorno[(mejorE + 1) % contorno.length], wx = wb.x - wa.x, wz = wb.y - wa.y, wL = Math.hypot(wx, wz);
+                var ux = wx / wL, uz = wz / wL, nx = signo * uz, nz = -signo * ux;
+                var ranuras = Math.max(2, Math.min(5, Math.floor(wL / escala / 2.2))), puertaR = Math.floor(rk() * ranuras);
+                var altoV = alto / escala;   // alto real del edificio, en metros
+                for (var j = 0; j < ranuras; j++) {
+                  var tj = (j + 0.5) / ranuras, pxj = wa.x + wx * tj, pzj = wa.y + wz * tj;
+                  if (j === puertaR) cuadroPared(pxj, pzj, ux, uz, nx, nz, 0.9 * escala, 0, Math.min(2.0, altoV * 0.7) * escala, '#5B3F2B');
+                  else cuadroPared(pxj, pzj, ux, uz, nx, nz, 1.0 * escala, 0.9 * escala, Math.min(1.9, altoV * 0.75) * escala, rk() < 0.3 ? '#4A5E70' : '#2E3B47');
+                }
+              }
+            }
           }
         });
         this.nReal = nReal;
@@ -846,27 +995,66 @@
         // se usan en tick() para que caminar en linea recta no atraviese los volumenes.
         this.colisiones = colisiones.concat(colisionesEdificios);
 
-        // --- 10. Puntos de basura y reciclaje (los iconos X rojos y tickets verdes del mapa de referencia) ---
-        // "basural" = X roja: un monton de basura (cajas chicas, desordenadas, de colores apagados).
-        // "naturaleza" = ticket verde: contenedor verde de reciclaje. "rocura" = punto azul (cilindro, como antes).
-        // Las posiciones vienen de los datos; se comprobaron contra el mapa de referencia (ver estado-y-decisiones).
+        // --- 10. BASURA Y RECICLAJE (iconos X rojos y tickets verdes del mapa de referencia): MISION SECUNDARIA ---
+        // "basural" = X roja: un monton de cajas que se recoge con un clic (queda "llevando", en la bolsa de la mano).
+        // "naturaleza" = ticket verde: contenedor verde; un clic con basura en la mano la deposita y enciende su punto verde.
+        // "rocura" = punto azul (solo decorativo). Las posiciones vienen de los datos.
         var semB = 3, azarB = function () { semB = (semB * 16807) % 2147483647; return semB / 2147483647; };
         var coloresBasura = ['#7A7A72', '#8A6F4E', '#4F6F86', '#A8A39A', '#6B4F36', '#5A7A55'];
+        var idxBasura = 0, idxContenedor = 0;
+        function conSonido(g, nombre, snd) {
+          g.setAttribute('sound__' + nombre, 'src: #' + snd + '; positional: true; poolSize: 2; volume: 1; refDistance: 1');
+          return function () { var c = g.components['sound__' + nombre]; if (c && c.loaded !== false) c.playSound(); };
+        }
+        function manita(g) {
+          g.addEventListener('mouseenter', function () { g.sceneEl.canvas.style.cursor = 'pointer'; });
+          g.addEventListener('mouseleave', function () { g.sceneEl.canvas.style.cursor = ''; });
+        }
         datos.reciclaje.forEach(function (r) {
           var q = aEscena(r.lon, r.lat);
           var g = crear('a-entity', { position: q.x + ' 0 ' + q.y });
           if (r.tipo === 'basural') {
+            var miIdx = idxBasura++;
             for (var ib = 0; ib < 9; ib++) {
               var w = (0.3 + azarB() * 0.5) * escala, h = (0.2 + azarB() * 0.45) * escala;
               crear('a-box', {
                 width: w, height: h, depth: (0.3 + azarB() * 0.5) * escala,
                 position: ((azarB() - 0.5) * 2.4 * escala) + ' ' + (h / 2) + ' ' + ((azarB() - 0.5) * 2.4 * escala),
-                rotation: '0 ' + Math.round(azarB() * 180) + ' 0', color: coloresBasura[ib % coloresBasura.length]
+                rotation: '0 ' + Math.round(azarB() * 180) + ' 0', color: coloresBasura[ib % coloresBasura.length], class: 'clickable'
               }, g);
             }
+            var sonarGolpe = conSonido(g, 'golpe', 'snd-golpe');
+            function quitarMonton() {
+              g.setAttribute('visible', false);
+              g.querySelectorAll('.clickable').forEach(function (h) { h.classList.remove('clickable'); });
+            }
+            if (basuraLlevada(miIdx) || basuraDepositada(miIdx)) { quitarMonton(); }
+            else {
+              manita(g);
+              g.addEventListener('click', function () {
+                if (basuraLlevada(miIdx)) return;
+                localStorage.setItem('norte-maps-basura-llevando-' + miIdx, '1');
+                sonarGolpe(); quitarMonton(); g.sceneEl.canvas.style.cursor = '';
+                window.dispatchEvent(new CustomEvent('norte-maps:basura'));
+              });
+            }
           } else if (r.tipo === 'naturaleza') {
-            crear('a-cylinder', { radius: 0.35 * escala, height: 1 * escala, position: '0 ' + (0.5 * escala) + ' 0', color: '#2E7D4F', 'segments-radial': 10, 'segments-height': 1 }, g);
-            crear('a-cylinder', { radius: 0.4 * escala, height: 0.08 * escala, position: '0 ' + (1.04 * escala) + ' 0', color: '#1F5C38', 'segments-radial': 10, 'segments-height': 1 }, g);
+            var miC = idxContenedor++;
+            crear('a-cylinder', { radius: 0.35 * escala, height: 1 * escala, position: '0 ' + (0.5 * escala) + ' 0', color: '#2E7D4F', 'segments-radial': 10, 'segments-height': 1, class: 'clickable' }, g);
+            crear('a-cylinder', { radius: 0.4 * escala, height: 0.08 * escala, position: '0 ' + (1.04 * escala) + ' 0', color: '#1F5C38', 'segments-radial': 10, 'segments-height': 1, class: 'clickable' }, g);
+            var luzC = crear('a-sphere', { radius: 0.12 * escala, position: '0 ' + (1.3 * escala) + ' 0', 'segments-width': 8, 'segments-height': 6 }, g);
+            function pintarLuzC() {
+              luzC.setAttribute('material', contenedorUsado(miC) ? 'color: #2BE05A; emissive: #2BE05A; emissiveIntensity: 1.4' : 'color: #3A3A3A');
+            }
+            pintarLuzC();
+            var sonarCampana = conSonido(g, 'campana', 'snd-campana');
+            manita(g);
+            g.addEventListener('click', function () {
+              g.object3D.scale.setScalar(1.12); setTimeout(function () { g.object3D.scale.setScalar(1); }, 120);   // pulso
+              if (contarBasuraLlevando() === 0) return;
+              depositarBasura();
+              localStorage.setItem('norte-maps-contenedor-usado-' + miC, '1'); pintarLuzC(); sonarCampana();
+            });
           } else {
             crear('a-cylinder', { radius: 0.25 * escala, height: 0.5 * escala, position: '0 ' + (0.25 * escala) + ' 0', color: '#3B8FA8', 'segments-radial': 10, 'segments-height': 1 }, g);
           }
@@ -1102,6 +1290,79 @@
           [imPerroCuerpo, imPerroCabeza, imPerroHocico, imPerroOreja, imPerroPata, imPerroCola].forEach(function (im) { im.instanceMatrix.needsUpdate = true; });
         }
 
+        var self_colisiones = this.colisiones;
+        // --- PANTALLA DEL VIDEOCLIP: en la cancha, sobre la pared de atras del gimnasio (el lugar de las fotos) ---
+        // Bloqueada (oscura, con el avance de la mision) hasta depositar toda la basura; despues, un clic abre el videoclip.
+        (function () {
+          var v = VOLUMENES.gimnasio; if (!v) return;
+          var hx = v.largo / 2 * escala;
+          var base = crear('a-entity', { position: (v.cx * escala) + ' 0 ' + (v.cz * escala), rotation: '0 ' + (-v.ang) + ' 0' });
+          var W = 9 * escala, H = 5 * escala, cy = 3.4 * escala, x0 = -(hx + 0.08 * escala);
+          crear('a-box', { width: W + 0.5 * escala, height: H + 0.5 * escala, depth: 0.1 * escala, position: x0 + ' ' + cy + ' 0', rotation: '0 -90 0', color: '#1E1E1E' }, base);   // marco
+          var lienzo = document.createElement('canvas'); lienzo.width = 512; lienzo.height = 288;
+          var tex = new THREE.CanvasTexture(lienzo); if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+          var pant = crear('a-plane', { width: W, height: H, position: (x0 - 0.06 * escala) + ' ' + cy + ' 0', rotation: '0 -90 0', material: 'shader: flat; color: #ffffff', class: 'clickable' }, base);
+          pant.addEventListener('loaded', function () { var m = pant.getObject3D('mesh'); if (m) { m.material.map = tex; m.material.needsUpdate = true; pintar(); } });
+          function pintar() {
+            var g = lienzo.getContext('2d'), listo = contarBasuraDepositada() === TOTAL_BASURA && TOTAL_BASURA > 0;
+            g.fillStyle = listo ? '#101820' : '#1A1A1A'; g.fillRect(0, 0, 512, 288);
+            g.textAlign = 'center'; g.fillStyle = '#fff';
+            if (listo) {
+              g.fillStyle = '#2BE05A'; g.beginPath(); g.moveTo(215, 95); g.lineTo(215, 195); g.lineTo(305, 145); g.closePath(); g.fill();
+              g.fillStyle = '#fff'; g.font = 'bold 36px sans-serif'; g.fillText('NORTE FLOW', 256, 55);
+              g.font = '22px sans-serif'; g.fillText('Videoclip de los niños · toca para ver', 256, 245);
+            } else {
+              g.font = 'bold 30px sans-serif'; g.fillText('Limpia el barrio', 256, 105);
+              g.font = '26px sans-serif'; g.fillStyle = '#9AA'; g.fillText('basura  ' + contarBasuraDepositada() + ' / ' + TOTAL_BASURA, 256, 160);
+              g.font = '20px sans-serif'; g.fillText('para ver el videoclip', 256, 205);
+            }
+            tex.needsUpdate = true;
+          }
+          window.addEventListener('norte-maps:basura', pintar);
+          pant.addEventListener('mouseenter', function () { pant.sceneEl.canvas.style.cursor = 'pointer'; });
+          pant.addEventListener('mouseleave', function () { pant.sceneEl.canvas.style.cursor = ''; });
+          pant.addEventListener('click', function () {
+            if (contarBasuraDepositada() === TOTAL_BASURA && TOTAL_BASURA > 0) abrirVideoclip();
+            else mostrarAviso('Recoge la basura del barrio (los montones grises) y deposítala en los contenedores verdes: ' + contarBasuraDepositada() + ' / ' + TOTAL_BASURA);
+          });
+        })();
+
+        // --- AUTOS ESTACIONADOS: unos 45 vehiculos quietos de colores a los costados de las calles ---
+        // (como en las fotos del barrio). Un solo InstancedMesh por pieza; con colision circular. Evitan edificios,
+        // volumenes, el humedal y el centro de la calle (donde circulan los colectivos).
+        (function () {
+          var sm = 71, az = function () { sm = (sm * 16807) % 2147483647; return sm / 2147483647; };
+          var pal = ['#F2F2F2', '#B8BCC2', '#C8553D', '#3B6FA8', '#1F2A36', '#7A8F5A', '#D9B95A', '#8C1F2B', '#5B5B5F', '#E8E1D0'];
+          var lista = [], intentos = 0;
+          while (lista.length < 45 && intentos < 4000 && rutas.length) {
+            intentos++;
+            var rt = rutas[Math.floor(az() * rutas.length)], pr = enRuta(rt, az() * rt.largo);
+            var lado = az() < 0.5 ? 1 : -1, off = (rt.nombre.indexOf('Avenida') === 0 ? 7.2 : 3.9) * escala * lado;
+            var x = pr.x + (-pr.dz) * off, z = pr.z + pr.dx * off;
+            if (dentroDeVolumen(x / escala, z / escala, 3)) continue;
+            if (enPoli(x, z, POLI_HUMEDAL)) continue;
+            if (colisionesEdificios.some(function (c) { return Math.hypot(x - c.x, z - c.z) < c.radio + 1.6 * escala; })) continue;
+            if (lista.some(function (o) { return Math.hypot(x - o.x, z - o.z) < 6 * escala; })) continue;
+            if (Math.hypot(x - 0, z - 0) < 14 * escala) continue;   // despejado alrededor del gimnasio
+            var giro = Math.atan2(pr.dz, pr.dx) + (az() < 0.5 ? 0 : Math.PI) + (az() - 0.5) * 0.08;
+            lista.push({ x: x, z: z, rot: -giro, color: pal[Math.floor(az() * pal.length)], camioneta: az() < 0.25 });
+          }
+          var n = lista.length; if (!n) return;
+          var cuerpo = instanciada(caja(), '#ffffff', n), cabina = instanciada(caja(), '#3C4A55', n), ruedas = instanciada(geoRueda, '#1A1A1A', n * 4);
+          var cc = new THREE.Color();
+          lista.forEach(function (c, i) {
+            vPos.set(c.x, 0, c.z); vQuat.setFromAxisAngle(EJE_Y, c.rot);
+            ponerParte(cuerpo, i, 0, 0.65, 0, c.camioneta ? 4.8 : 4.2, 0.75, 1.8);
+            if (c.camioneta) ponerParte(cabina, i, 0.9, 1.3, 0, 1.8, 0.6, 1.6); else ponerParte(cabina, i, -0.2, 1.3, 0, 2.1, 0.6, 1.6);
+            var w = [[1.3, 0.9], [1.3, -0.9], [-1.3, 0.9], [-1.3, -0.9]];
+            for (var k = 0; k < 4; k++) ponerParte(ruedas, i * 4 + k, w[k][0], 0.32, w[k][1], 0.32, 0.32, 0.22);
+            cuerpo.setColorAt(i, cc.set(c.color));
+            self_colisiones.push({ x: c.x, z: c.z, radio: 1.7 * escala });
+          });
+          cuerpo.instanceColor.needsUpdate = true;
+          [cuerpo, cabina, ruedas].forEach(function (im) { im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; });
+        })();
+
         this.vida = function (dt) {
           var t = performance.now();
           actualizarColectivos(dt); actualizarBus(dt); actualizarPerros(dt, t);
@@ -1239,20 +1500,22 @@
         if (escena.hasLoaded) ubicarVisitante(); else escena.addEventListener('loaded', ubicarVisitante);
 
         // --- 12. Cartelito de ayuda ---
-        this.hud = document.getElementById('hud');
+        this.hud = document.getElementById('hud-cuerpo');
         this.contador = 0;
         this.escribirHud(null);
       },
 
       // Texto del cartelito: escala, distancia real al gimnasio y teclas.
       escribirHud: function (distanciaEscena) {
-        if (!this.hud) return;
+        if (!this.hud || !this.hud.parentNode.classList.contains('abierto')) return;   // plegada: no gasta tiempo
         var esc = this.escala;
         var linea1 = 'Norte Maps · escala 1:' + (1 / esc).toFixed(esc >= 0.95 ? 0 : 1).replace(/\.0$/, '') + ' (1 m real = ' + esc + ' m aqui)';
         var linea2 = distanciaEscena === null ? '' : '<br>Estas a ' + Math.round(distanciaEscena / esc) + ' m reales del gimnasio';
         this.hud.innerHTML = linea1 + linea2 +
-          '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar' +
-          '<br>Otra escala: agregar <b>?escala=1</b> a la direccion' +
+          (ES_TACTIL
+            ? '<br>Botones ▲ ▼ para caminar (⏩ rápido) · arrastra el dedo o gira el teléfono para mirar · toca cassettes, puertas y basura'
+            : '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar · clic en cassettes, puertas y basura' +
+              '<br>Otra escala: agregar <b>?escala=1</b> a la direccion') +
           '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
       },
 
@@ -1307,6 +1570,16 @@
       // (no hace falta redibujar en cada cuadro); la colision, en cambio, se revisa siempre.
       tick: function (t, dt) {
         if (!this.camara) return;
+        if (AVANCE.v) {   // caminar con los botones tactiles: hacia donde mira la camara, en horizontal
+          var camT = this.camara, dirT = this._dirT || (this._dirT = new THREE.Vector3());
+          camT.object3D.getWorldDirection(dirT); dirT.y = 0;
+          if (dirT.lengthSq() > 1e-6) {
+            dirT.normalize();
+            var enSalaT = camT.object3D.position.x > 200;   // dentro de las salas, mas lento
+            var velT = (AVANCE.rapido ? 3.0 : 0.9) * (enSalaT ? 0.4 : 1) * AVANCE.v * Math.min(dt || 16, 100) / 1000;
+            camT.object3D.position.x -= dirT.x * velT; camT.object3D.position.z -= dirT.z * velT;
+          }
+        }
         this.resolverColisiones();
         if (this.vida) this.vida(Math.min(dt || 16, 100));   // vehiculos y perritos en movimiento
         this.contador++;
@@ -1320,7 +1593,7 @@
 </head>
 
 <body>
-  <div id="hud"></div>
+  <div id="hud"><div id="hud-cuerpo"></div><button id="hud-boton">? Ayuda</button></div>
 
   <!-- Minimapa: vista cenital fija del barrio (calles, territorio, puntos) con la
        posicion y orientacion del visitante, para ubicarse en contexto mientras se
@@ -1343,10 +1616,19 @@
   <!-- Reiniciar: borra lo recolectado en ESTE navegador y recarga (no habia forma de
        volver a empezar sin abrir la consola). Pide confirmacion antes de borrar. -->
   <button id="boton-reiniciar"
-    style="position:fixed; left:12px; top:12px; z-index:10; font:12px system-ui, sans-serif;
-           padding:5px 10px; border-radius:6px; border:0; background:rgba(0,0,0,0.55); color:#fff; cursor:pointer;">
+    style="position:fixed; left:50%; transform:translateX(-50%); top:12px; z-index:10; font:12px system-ui, sans-serif;
+           padding:5px 10px; border-radius:6px; border:0; background:rgba(0,0,0,0.55); color:#fff; cursor:pointer; white-space:nowrap;">
     ⟲ Reiniciar
   </button>
+
+  <!-- Controles tactiles (solo se ven en telefono/tablet): caminar mientras se mantienen presionados -->
+  <div id="ctl-tactil">
+    <button class="ctl-btn" id="ctl-rapido" aria-label="Avanzar rápido">⏩</button>
+    <button class="ctl-btn" id="ctl-avanzar" aria-label="Avanzar">▲</button>
+    <button class="ctl-btn" id="ctl-retroceder" aria-label="Retroceder">▼</button>
+  </div>
+
+  <div id="aviso"></div>
 
   <!-- El documental (video externo embebido via YouTube, no alojado aqui: el original
        pesa ~2GB) ya NO se abre con un boton flotante: ahora se reproduce desde la
@@ -1419,6 +1701,12 @@
         <a-cylinder radius="0.028" height="0.034" position="-0.045 0.02 0" color="#222" segments-radial="10"></a-cylinder>
         <a-cylinder radius="0.028" height="0.034" position="0.045 0.02 0" color="#222" segments-radial="10"></a-cylinder>
         <a-entity id="texto-mano" text="value: ; align: center; color: #fff; width: 3" position="0 0.12 0"></a-entity>
+      </a-entity>
+      <!-- Bolsa de basura que llevas (mision secundaria), a la izquierda -->
+      <a-entity id="mano-basura" visible="false" position="-0.45 -0.32 -0.9" scale="0.35 0.35 0.35">
+        <a-box width="0.16" height="0.2" depth="0.1" color="#3A3A36"></a-box>
+        <a-box width="0.08" height="0.04" depth="0.08" position="0 0.12 0" color="#3A3A36"></a-box>
+        <a-entity id="texto-basura" text="value: ; align: center; color: #fff; width: 3" position="0 0.3 0"></a-entity>
       </a-entity>
     </a-entity>
 
