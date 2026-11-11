@@ -31,13 +31,15 @@
     #joy-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
                 background: rgba(255,255,255,0.80); box-shadow: 0 1px 6px rgba(0,0,0,0.4); pointer-events: none; }
     #joy.activo { background: rgba(59,143,168,0.40); }
-    .ctl-btn { width: 56px; height: 56px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.55); color: #fff;
-               font: 22px system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-    .ctl-btn.activo { background: rgba(59,143,168,0.9); }
+    /* boton de correr: solo el simbolo, sin fondo, semitransparente; se enciende al activarlo */
+    .ctl-btn { width: 64px; height: 56px; border: 0; background: transparent; color: rgba(255,255,255,0.55);
+               font: 700 44px/1 system-ui, sans-serif; text-shadow: 0 0 6px rgba(0,0,0,0.65); touch-action: none; user-select: none;
+               -webkit-user-select: none; -webkit-touch-callout: none; padding: 0; }
+    .ctl-btn.activo { color: #8FE6FF; text-shadow: 0 0 10px rgba(0,120,160,0.9); }
     #aviso { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 15; display: none; max-width: 80vw;
              background: rgba(30,120,60,0.95); color: #fff; padding: 10px 16px; border-radius: 8px; font: 14px system-ui, sans-serif; text-align: center; }
     @media (max-width: 520px) { #contador-recoleccion .txt-largo { display: none; } }
-    @media (max-height: 480px) { #minimapa { width: 100px; height: 100px; } #joy { width: 104px; height: 104px; bottom: 58px; } .ctl-btn { width: 50px; height: 50px; } }
+    @media (max-height: 480px) { #minimapa { width: 100px; height: 100px; } #joy { width: 104px; height: 104px; bottom: 58px; } .ctl-btn { width: 54px; height: 48px; font-size: 38px; } }
   </style>
 
   <script>
@@ -89,6 +91,17 @@
     var ES_TACTIL = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window) || new URLSearchParams(location.search).get('tactil') === '1';
     var AVANCE = { x: 0, y: 0, rapido: false };   // x: lateral (+ derecha), y: avance (+ adelante), de -1 a 1; lo fija el joystick
 
+    // ---------- 0b2) tutorial dentro de la radio (CECOF) ----------
+    // El visitante parte DENTRO del CECOF, junto a la radio. Estado en localStorage: '' (sin empezar) -> 'llevando' (cassette
+    // en la mano) -> 'listo' (guardado en la radio). El cassette del tutorial NO cuenta para los 9 relatos.
+    function tutEstado() { return localStorage.getItem('norte-maps-tutorial') || ''; }
+    function tutCambiar(e) {
+      localStorage.setItem('norte-maps-tutorial', e);
+      window.dispatchEvent(new CustomEvent('norte-maps:tutorial'));
+      window.dispatchEvent(new CustomEvent('norte-maps:llevando-cambio'));
+    }
+    var TUT_TEXTO = { '': 'TUTORIAL\n1. Toca el cassette\nde la mesa', llevando: '2. Llevalo a la radio:\ntoca la radio', listo: '3. Listo! Asi se guardan\nlos relatos.\nSal por la puerta' };
+
     // ---------- 0c) mision secundaria: basura ----------
     // 5 montones de basura (las X rojas del mapa). Se recogen con un clic (quedan "llevando", en una bolsa en la mano)
     // y se depositan en un contenedor verde (los tickets verdes del mapa). Con todo depositado se desbloquea el videoclip.
@@ -137,7 +150,7 @@
     function actualizarMano() {
       var n = contarLlevando();
       var mano = document.getElementById('mano-cassettes');
-      if (mano) mano.setAttribute('visible', n > 0);
+      if (mano) mano.setAttribute('visible', n > 0 || tutEstado() === 'llevando');
       var texto = document.getElementById('texto-mano');
       if (texto) texto.setAttribute('text', 'value', n > 0 ? ('x' + n) : '');
       var nb = contarBasuraLlevando();
@@ -210,7 +223,12 @@
       }
       // correr: boton que se enciende y se apaga (no hace falta mantenerlo: el pulgar queda libre para el joystick)
       var br = document.getElementById('ctl-rapido');
-      if (br) br.addEventListener('click', function () { AVANCE.rapido = !AVANCE.rapido; br.classList.toggle('activo', AVANCE.rapido); });
+      // OJO: se usa pointerdown y no click: con un dedo ya apoyado en el joystick, Android puede descartar el "click" del segundo dedo.
+      if (br) {
+        br.addEventListener('pointerdown', function (e) { e.preventDefault(); AVANCE.rapido = !AVANCE.rapido; br.classList.toggle('activo', AVANCE.rapido); });
+        br.addEventListener('click', function (e) { e.preventDefault(); });
+        br.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      }
       // ayuda plegable: abierta en computador, cerrada en telefono
       var hud = document.getElementById('hud'), hb = document.getElementById('hud-boton');
       function pintarHb() { hb.textContent = hud.classList.contains('abierto') ? '✕ Ayuda' : '? Ayuda'; }
@@ -418,7 +436,32 @@
         }
 
         // --- 4. Niebla: mas cerca cuanto mas chico el mapa (con 0.2 es igual a la version anterior) ---
-        escena.setAttribute('fog', 'type: linear; color: #ECECEC; near: ' + (125 * escala) + '; far: ' + (475 * escala));
+        // CIELO: celeste con algunas nubes (semi despejado), una esfera con degradado dibujado en canvas (sin archivos).
+        // El color de la niebla y del fondo es el del horizonte, para que el suelo lejano se funda con el cielo.
+        var COLOR_HORIZONTE = '#CFE3F2';
+        escena.setAttribute('fog', 'type: linear; color: ' + COLOR_HORIZONTE + '; near: ' + (125 * escala) + '; far: ' + (475 * escala));
+        escena.setAttribute('background', 'color', COLOR_HORIZONTE);
+        (function () {
+          var c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+          var g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256);
+          gr.addColorStop(0, '#2F7FD0'); gr.addColorStop(0.5, '#6FB4EC'); gr.addColorStop(1, COLOR_HORIZONTE);
+          g.fillStyle = gr; g.fillRect(0, 0, 1024, 256); g.fillStyle = COLOR_HORIZONTE; g.fillRect(0, 256, 1024, 256);
+          var sc = 13, az = function () { sc = (sc * 16807) % 2147483647; return sc / 2147483647; };
+          for (var n = 0; n < 9; n++) {   // 9 nubes, cada una con varias bolitas difusas; se repiten en los bordes (sin costura)
+            var cx = az() * 1024, cy = 60 + az() * 150, ancho = 60 + az() * 90;
+            for (var b = 0; b < 7; b++) {
+              var bx = cx + (az() - 0.5) * ancho, by = cy + (az() - 0.5) * ancho * 0.18, br = ancho * (0.22 + az() * 0.2);
+              for (var dx = -1024; dx <= 1024; dx += 1024) {
+                var rg = g.createRadialGradient(bx + dx, by, 0, bx + dx, by, br);
+                rg.addColorStop(0, 'rgba(255,255,255,0.7)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+                g.fillStyle = rg; g.fillRect(bx + dx - br, by - br, br * 2, br * 2);
+              }
+            }
+          }
+          var tex = new THREE.CanvasTexture(c); if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+          var cielo = new THREE.Mesh(new THREE.SphereGeometry(1400, 32, 16), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }));
+          cielo.renderOrder = -10; el.setObject3D('cielo', cielo);
+        })();
 
         // --- 5. Suelo (un plano enorme) ---
         var lado = Math.max(500, 2600 * escala);
@@ -507,7 +550,10 @@
         // OJO: alturas ESTIMADAS (no medidas) y la profundidad del CECOF tambien: ajustar aqui.
         var VOLUMENES = {
           gimnasio: { cx: -5.9,  cz: -1.7, ang: 29.5, largo: 30.3, ancho: 22.1, alto: 6, color: '#CDBF9E' },
-          cecof:    { cx: -11.3, cz: 16.7, ang: 29.5, largo: 22.0, ancho: 10.5, alto: 4, color: '#C9B68F' }
+          cecof:    { cx: -11.3, cz: 16.7, ang: 29.5, largo: 22.0, ancho: 10.5, alto: 4, color: '#C9B68F' },
+          // multicancha (plana, caminable, sin puerta ni colision): solo reserva el espacio para que no se pongan casas, autos ni perros encima.
+          // POSICION Y TAMANO ESTIMADOS: en el mapa referencial no se distingue su contorno; se centro en el icono y se alineo con la calle Rancagua.
+          multicancha: { cx: 293.7, cz: 227.3, ang: -55.2, largo: 30, ancho: 16, alto: 0, color: '#4E8F6A' }
         };
         Object.keys(VOLUMENES).forEach(function (k) {
           var v = VOLUMENES[k], a = v.ang * Math.PI / 180;
@@ -540,8 +586,19 @@
         var segsCalles = [];
         datos.calles.forEach(function (c) {
           var pp = c.pts.map(function (q) { return aEscena(q[0], q[1]); });
-          for (var i = 0; i < pp.length - 1; i++) segsCalles.push([pp[i].x, pp[i].y, pp[i + 1].x, pp[i + 1].y]);
+          var mitad = (c.nombre.indexOf('Avenida') === 0 ? anchoCalle * 1.8 : anchoCalle) / 2;   // medio ancho de la calzada
+          for (var i = 0; i < pp.length - 1; i++) segsCalles.push([pp[i].x, pp[i].y, pp[i + 1].x, pp[i + 1].y, mitad]);
         });
+        // distancia (unidades de escena) del punto (x, z) al BORDE de la calzada mas cercana (negativa si esta sobre la calle)
+        function holguraCalle(x, z) {
+          var mejor = Infinity;
+          for (var s = 0; s < segsCalles.length; s++) {
+            var sg = segsCalles[s], sx = sg[2] - sg[0], sz = sg[3] - sg[1], l2 = sx * sx + sz * sz;
+            var tt = l2 ? Math.max(0, Math.min(1, ((x - sg[0]) * sx + (z - sg[1]) * sz) / l2)) : 0;
+            mejor = Math.min(mejor, Math.hypot(x - (sg[0] + tt * sx), z - (sg[1] + tt * sz)) - sg[4]);
+          }
+          return mejor;
+        }
         // un rectangulo vertical pegado a una pared (ventana o puerta): centro (cx,cz), eje u a lo largo de la pared, normal n hacia afuera
         function cuadroPared(cx, cz, ux, uz, nx, nz, ancho, y0, y1, color) {
           var off = 0.05 * escala, hw = ancho / 2, v = posE.length / 3, col = new THREE.Color(color);
@@ -683,6 +740,12 @@
           crear('a-box', { width: grosor, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre);
           crear('a-box', { width: grosor, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre);
           crear('a-plane', { width: ancho, height: ancho, rotation: '90 0 0', position: '0 ' + alto + ' 0', color: '#E4DFD0' }, padre);   // techo: la sala queda cerrada
+          // cartel SALIDA sobre la puerta (en el muro del frente, mirando hacia adentro)
+          if (centro) {
+            var zc = ancho / 2 - grosor / 2 - 0.02 * escala;
+            crear('a-box', { width: 2.2 * escala, height: 0.55 * escala, depth: 0.03 * escala, position: '0 ' + (2.55 * escala) + ' ' + zc, color: '#1E7A46' }, padre);
+            crear('a-entity', { text: 'value: SALIDA; align: center; color: #FFFFFF; width: ' + (3.4 * escala) + '; font: mozillavr', position: '0 ' + (2.55 * escala) + ' ' + (zc - 0.02 * escala), rotation: '0 180 0' }, padre);
+          }
           // la luz de cada sala es FOCAL (spot), la pone cada sala; ya no hay luz puntual central.
           // la camara se queda dentro de las paredes (margen mayor al plano cercano de la camara)
           if (centro) salasColision.push({ x: centro.x, z: centro.z, half: ancho / 2 - grosor - 0.1, fuera: ancho * 1.5 });
@@ -704,9 +767,16 @@
             var marcaRadio = crear('a-entity', { position: '0 0 ' + (-1 * escala) }, sala);
             crear('a-box', { width: 0.6 * escala, height: 1 * escala, depth: 0.5 * escala, position: '0 ' + (0.5 * escala) + ' 0', color: '#9C7A54' }, marcaRadio);
             var modeloRadio = crear('a-entity', { 'gltf-model': '#radio', position: '0 ' + (1 * escala) + ' 0', scale: (2 * escala) + ' ' + (2 * escala) + ' ' + (2 * escala), class: 'clickable' }, marcaRadio);
+            modeloRadio.setAttribute('sound__ok', 'src: #snd-campana; positional: true; poolSize: 1; volume: 1; refDistance: 1');
             modeloRadio.addEventListener('mouseenter', function () { modeloRadio.sceneEl.canvas.style.cursor = 'pointer'; modeloRadio.object3D.scale.setScalar(2.2 * escala); });
             modeloRadio.addEventListener('mouseleave', function () { modeloRadio.sceneEl.canvas.style.cursor = ''; modeloRadio.object3D.scale.setScalar(2 * escala); });
             modeloRadio.addEventListener('click', function () {
+              if (tutEstado() === 'llevando') {   // fin del tutorial: el cassette de la mesa queda guardado en la radio
+                tutCambiar('listo');
+                var sOk = modeloRadio.components['sound__ok']; if (sOk && sOk.loaded !== false) sOk.playSound();
+                mostrarAviso('Listo: asi se guardan los relatos en la radio. Sal por la puerta (SALIDA).');
+                return;
+              }
               if (contarLlevando() > 0) { depositarTodo(); return; }
               var audioRadio = document.getElementById('audio-' + radioData.audio);
               if (!audioRadio) return;
@@ -714,6 +784,31 @@
               else { audioRadio.pause(); }
             });
           }
+
+          // --- TUTORIAL: un cassette sobre una mesa; se toca (se lleva), se lleva a la radio y se sale por la puerta ---
+          crear('a-box', { width: 0.8 * escala, height: 0.7 * escala, depth: 0.8 * escala, position: (2.5 * escala) + ' ' + (0.35 * escala) + ' ' + (-2 * escala), color: '#9C7A54' }, sala);
+          var cassT = crear('a-entity', { position: (2.5 * escala) + ' ' + (0.76 * escala) + ' ' + (-2 * escala), scale: '2.6 2.6 2.6' }, sala);
+          crear('a-box', { width: 0.18 * escala, height: 0.03 * escala, depth: 0.11 * escala, color: '#E8743B', class: 'clickable' }, cassT);
+          crear('a-cylinder', { radius: 0.028 * escala, height: 0.034 * escala, position: (-0.045 * escala) + ' ' + (0.02 * escala) + ' 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassT);
+          crear('a-cylinder', { radius: 0.028 * escala, height: 0.034 * escala, position: (0.045 * escala) + ' ' + (0.02 * escala) + ' 0', color: '#222', 'segments-radial': 10, class: 'clickable' }, cassT);
+          cassT.setAttribute('sound__golpe', 'src: #snd-golpe; positional: true; poolSize: 1; volume: 1; refDistance: 1');
+          var tutTexto = crear('a-entity', {
+            text: 'value: ' + TUT_TEXTO[tutEstado()] + '; align: center; color: #FFE9A8; width: ' + (2.4 * escala) + '; wrapCount: 24',
+            position: (2.5 * escala) + ' ' + (1.55 * escala) + ' ' + (-2 * escala), 'mirar-camara': ''
+          }, sala);
+          function ocultarCassTut() { cassT.setAttribute('visible', false); cassT.querySelectorAll('.clickable').forEach(function (h) { h.classList.remove('clickable'); }); }
+          if (tutEstado() !== '') ocultarCassTut();
+          else {
+            cassT.addEventListener('mouseenter', function () { cassT.sceneEl.canvas.style.cursor = 'pointer'; cassT.object3D.scale.setScalar(2.9); });
+            cassT.addEventListener('mouseleave', function () { cassT.sceneEl.canvas.style.cursor = ''; cassT.object3D.scale.setScalar(2.6); });
+            cassT.addEventListener('click', function () {
+              var s = cassT.components['sound__golpe']; if (s && s.loaded !== false) s.playSound();
+              cassT.sceneEl.canvas.style.cursor = ''; ocultarCassTut(); tutCambiar('llevando'); refrescarRaycaster();
+            });
+          }
+          crear('a-entity', { id: 'objetivo-tut', position: (2.5 * escala) + ' ' + (0.6 * escala) + ' ' + (-2 * escala) }, sala);
+          crear('a-entity', { light: 'type: spot; color: #FFF1D6; intensity: 2.2; angle: 28; penumbra: 0.5; decay: 1; distance: ' + (10 * escala) + '; target: #objetivo-tut', position: (1.2 * escala) + ' ' + (3.7 * escala) + ' ' + (-0.5 * escala) }, sala);
+          window.addEventListener('norte-maps:tutorial', function () { tutTexto.setAttribute('text', 'value', TUT_TEXTO[tutEstado()]); });
 
           // El rack: EN LA PARED izquierda (no sobre una mesa), un cassette "ranura" por
           // cada relato que se encuentra afuera (todos menos la radio), con su nombre
@@ -842,6 +937,7 @@
 
         // --- 10. Los puntos del mapa exterior ---
         var camaraInicio = null;                       // donde parte el visitante (se calcula abajo)
+        var inicioSala = null;                         // si existe, el visitante parte DENTRO del CECOF (junto a la radio); ?inicio=calle lo deja afuera
         var radioData = datos.puntos.find(function (p) { return p.tipo === 'radio'; });
         var colisiones = [];   // circulos (centro+radio, en unidades de escena) contra los que choca la camara
         this.colisiones = colisiones;
@@ -903,7 +999,8 @@
                            mirX: (vol.cx + d0 * vol.ux) * escala, mirZ: (vol.cz + d0 * vol.uz) * escala };
             var sala = p.tipo === 'gimnasio' ? SALA_GIMNASIO : SALA_CECOF;
             puertaExt.setAttribute('portal', 'destino: ' + sala.x + ' ' + (1.6 * escala) + ' ' + (sala.z + 3 * escala) + '; mirara: ' + sala.x + ' ' + (1.6 * escala) + ' ' + sala.z + '; interior: true');
-            if (p.tipo === 'gimnasio') construirSalaGimnasio(salida); else construirSalaCecof(salida, radioData);
+            if (p.tipo === 'gimnasio') construirSalaGimnasio(salida);
+            else { construirSalaCecof(salida, radioData); inicioSala = new THREE.Vector3(SALA_CECOF.x, 1.6 * escala, SALA_CECOF.z + 2.4 * escala); }
           }
 
           // cartel con el nombre (siempre mirando al visitante, sin instrucciones -- el
@@ -928,6 +1025,7 @@
 
         // Un arbol simple (tronco + dos conos). Mismo estilo que los del humedal.
         function plantarArbol(x, z, tam, verde) {
+          if (holguraCalle(x, z) < 2.4 * escala) return;   // no plantar sobre la calle
           var arb = e3('a-entity', { position: x + ' 0 ' + z });
           e3('a-cylinder', { radius: 0.2 * escala * tam, height: 2.2 * escala * tam, position: '0 ' + (1.1 * escala * tam) + ' 0', color: '#6B4F36', 'segments-radial': 6, 'segments-height': 1 }, arb);
           e3('a-cone', { 'radius-bottom': 1.6 * escala * tam, 'radius-top': 0, height: 3.4 * escala * tam, position: '0 ' + (3.4 * escala * tam) + ' 0', color: verde, 'segments-radial': 7, 'segments-height': 1 }, arb);
@@ -1311,6 +1409,58 @@
         }
 
         var self_colisiones = this.colisiones;
+        // --- MULTICANCHA (punto "cancha de Rancagua") y CARRITO DE COMIDA RAPIDA (punto "Comida Rapida") ---
+        (function () {
+          var v = VOLUMENES.multicancha;
+          var cancha = crear('a-entity', { position: (v.cx * escala) + ' 0.03 ' + (v.cz * escala), rotation: '0 ' + (-v.ang) + ' 0' });
+          var L = v.largo * escala, A = v.ancho * escala;
+          var lienzo = document.createElement('canvas'); lienzo.width = 1024; lienzo.height = 546;
+          var g = lienzo.getContext('2d');
+          g.fillStyle = '#2F7D58'; g.fillRect(0, 0, 1024, 546);
+          g.fillStyle = '#26694A'; for (var fx = 0; fx < 1024; fx += 128) if ((fx / 128) % 2 === 0) g.fillRect(fx, 0, 128, 546);   // franjas
+          g.strokeStyle = '#F5F5F0'; g.lineWidth = 6;
+          g.strokeRect(24, 24, 976, 498); g.beginPath(); g.moveTo(512, 24); g.lineTo(512, 522); g.stroke();
+          g.beginPath(); g.arc(512, 273, 70, 0, 6.2832); g.stroke();
+          g.strokeRect(24, 163, 130, 220); g.strokeRect(870, 163, 130, 220);
+          var tex = new THREE.CanvasTexture(lienzo); if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+          var suelo = crear('a-plane', { width: L, height: A, rotation: '-90 0 0', material: 'shader: flat; color: #ffffff' }, cancha);
+          suelo.addEventListener('loaded', function () { var mm = suelo.getObject3D('mesh'); if (mm) { mm.material.map = tex; mm.material.needsUpdate = true; } });
+          // arcos en los dos extremos (largo = eje x local) y reja baja a los costados
+          [-1, 1].forEach(function (s) {
+            var x = s * (L / 2 - 0.15 * escala);
+            crear('a-box', { width: 0.12 * escala, height: 2.1 * escala, depth: 0.12 * escala, position: x + ' ' + (1.05 * escala) + ' ' + (-1.5 * escala), color: '#E8E8E8' }, cancha);
+            crear('a-box', { width: 0.12 * escala, height: 2.1 * escala, depth: 0.12 * escala, position: x + ' ' + (1.05 * escala) + ' ' + (1.5 * escala), color: '#E8E8E8' }, cancha);
+            crear('a-box', { width: 0.12 * escala, height: 0.12 * escala, depth: 3.1 * escala, position: x + ' ' + (2.1 * escala) + ' 0', color: '#E8E8E8' }, cancha);
+          });
+          [-1, 1].forEach(function (s) {
+            crear('a-box', { width: L, height: 0.9 * escala, depth: 0.08 * escala, position: '0 ' + (0.45 * escala) + ' ' + (s * (A / 2 + 0.1 * escala)), color: '#5A6670' }, cancha);
+          });
+        })();
+
+        (function () {
+          var q = puntoPorNombre('Comida Rapida'); if (!q) return;
+          // el carrito se pone 5 m del punto hacia la calle mas cercana, mirando a la calle
+          var mejor = Infinity, qx = 0, qz = 0;
+          segsCalles.forEach(function (sg) {
+            var sx = sg[2] - sg[0], sz = sg[3] - sg[1], l2 = sx * sx + sz * sz, tt = l2 ? Math.max(0, Math.min(1, ((q.x - sg[0]) * sx + (q.y - sg[1]) * sz) / l2)) : 0;
+            var px = sg[0] + tt * sx, pz = sg[1] + tt * sz, dd = Math.hypot(q.x - px, q.y - pz);
+            if (dd < mejor) { mejor = dd; qx = px; qz = pz; }
+          });
+          var dx = (qx - q.x) / (mejor || 1), dz = (qz - q.y) / (mejor || 1);
+          var carro = crear('a-entity', { position: (q.x + dx * 5 * escala) + ' 0 ' + (q.y + dz * 5 * escala), rotation: '0 ' + (Math.atan2(-dz, dx) * 180 / Math.PI) + ' 0' });
+          crear('a-box', { width: 2.2 * escala, height: 1.0 * escala, depth: 1.3 * escala, position: '0 ' + (0.95 * escala) + ' 0', color: '#F2EFE6' }, carro);       // cuerpo
+          crear('a-box', { width: 2.3 * escala, height: 0.12 * escala, depth: 1.4 * escala, position: '0 ' + (1.5 * escala) + ' 0', color: '#C8553D' }, carro);       // mesada roja
+          crear('a-box', { width: 2.4 * escala, height: 0.08 * escala, depth: 1.8 * escala, position: (0.35 * escala) + ' ' + (2.35 * escala) + ' 0', rotation: '0 0 -12', color: '#F2C300' }, carro);   // toldo amarillo
+          [[-1.0, -0.6], [-1.0, 0.6], [1.0, -0.6], [1.0, 0.6]].forEach(function (pp) {
+            crear('a-cylinder', { radius: 0.04 * escala, height: 1.7 * escala, position: (pp[0] * escala) + ' ' + (1.55 * escala) + ' ' + (pp[1] * escala), color: '#8A8A8A', 'segments-radial': 5, 'segments-height': 1 }, carro);
+          });
+          [[-0.8, 0.72], [0.8, 0.72]].forEach(function (pp) {
+            crear('a-cylinder', { radius: 0.3 * escala, height: 0.1 * escala, rotation: '90 0 0', position: (pp[0] * escala) + ' ' + (0.3 * escala) + ' ' + (pp[1] * escala), color: '#1A1A1A', 'segments-radial': 10, 'segments-height': 1 }, carro);
+          });
+          crear('a-entity', { text: 'value: COMIDA RAPIDA; align: center; color: #1A1A1A; width: ' + (2.2 * escala), position: (1.12 * escala) + ' ' + (1.0 * escala) + ' 0', rotation: '0 90 0' }, carro);
+          colisiones.push({ x: q.x + dx * 5 * escala, z: q.y + dz * 5 * escala, radio: 1.3 * escala });
+        })();
+
         // --- PANTALLA DEL VIDEOCLIP: en la cancha, sobre la pared de atras del gimnasio (el lugar de las fotos) ---
         // Bloqueada (oscura, con el avance de la mision) hasta depositar toda la basura; despues, un clic abre el videoclip.
         (function () {
@@ -1395,7 +1545,7 @@
         // color puede equivocarse en sombras. Se dibujan con InstancedMesh (2 llamadas de dibujo en total).
         var ARBOLES_BORDE = [[-291.4,-169.4],[132.7,-168.7],[141.3,-168.8],[155.8,-170.8],[168.6,-170.0],[177.3,-172.4],[290.0,-171.9],[-362.3,-161.3],[58.7,-163.1],[121.6,-160.0],[132.6,-163.4],[159.2,-163.5],[176.0,-163.5],[182.1,-160.2],[-310.9,-154.1],[63.0,-151.4],[77.6,-151.0],[96.3,-152.2],[103.6,-151.1],[141.1,-151.0],[150.8,-153.9],[183.7,-154.5],[59.3,-146.1],[68.8,-143.7],[155.7,-143.4],[192.4,-145.1],[203.4,-144.3],[236.4,-144.4],[247.0,-146.2],[-236.9,-137.3],[70.8,-133.8],[76.4,-134.1],[192.6,-135.1],[199.8,-137.4],[209.4,-133.4],[218.3,-134.3],[230.3,-133.5],[-248.5,-127.0],[52.1,-125.3],[103.2,-125.5],[132.7,-125.0],[138.2,-124.6],[147.2,-127.3],[202.5,-124.8],[210.1,-124.7],[219.8,-127.5],[227.6,-128.1],[235.4,-128.2],[-255.8,-115.4],[50.5,-119.7],[89.5,-117.6],[104.5,-118.9],[114.2,-116.3],[148.9,-118.1],[182.4,-116.0],[199.9,-117.8],[212.3,-119.4],[220.6,-115.8],[229.0,-116.5],[235.5,-118.1],[-267.0,-107.2],[60.0,-109.1],[71.9,-107.4],[107.1,-109.1],[140.2,-107.9],[184.2,-109.9],[201.5,-110.5],[210.3,-106.8],[221.6,-108.4],[237.2,-109.7],[-276.1,-100.9],[18.0,-98.4],[60.3,-98.8],[70.9,-99.2],[105.7,-99.0],[130.8,-99.2],[139.3,-100.2],[150.3,-99.3],[165.8,-98.2],[176.2,-99.8],[-285.2,-90.9],[24.5,-90.5],[69.5,-89.9],[79.2,-90.0],[95.5,-90.6],[167.8,-89.9],[-380.8,-80.7],[36.0,-81.6],[80.6,-80.4],[87.4,-82.3],[94.7,-81.0],[168.6,-82.6],[176.4,-81.5],[79.5,-75.1],[88.6,-73.3],[96.9,-74.0],[105.5,-72.4],[123.2,-72.7],[164.6,-75.2],[95.9,-64.2],[103.7,-64.0],[114.4,-66.9],[122.5,-66.0],[164.8,-66.5],[-372.1,-57.2],[-363.8,-57.8],[166.6,-56.6],[176.0,-55.6],[-381.2,-45.2],[-373.5,-47.4],[139.3,-47.6],[165.0,-45.8],[175.0,-49.3],[167.2,-40.2],[175.8,-39.1],[175.9,-27.6],[203.4,-30.0],[212.2,-29.0],[219.1,-31.2],[228.9,-29.3],[301.0,-27.6],[273.1,-12.7],[-307.8,-5.1],[-275.9,6.2],[-317.8,13.2],[-317.7,25.3],[-292.4,23.3],[262.6,22.4],[274.7,22.7],[283.5,25.1],[-300.2,31.3],[283.5,32.1],[-398.0,40.5],[-307.3,41.2],[218.8,58.5],[429.7,111.9],[431.2,119.3],[423.8,130.5],[-399.8,138.4],[412.8,139.8],[-396.4,146.0],[403.9,154.0],[398.3,163.4],[387.8,173.0],[379.2,191.3],[370.8,197.9],[362.0,207.6],[361.0,216.5],[351.2,226.2],[343.1,234.3],[335.5,244.1],[332.4,251.5],[325.4,263.2],[318.5,270.4],[191.2,280.3],[43.1,288.3],[70.8,288.6],[307.9,289.7],[34.1,296.3],[300.8,295.3],[24.9,307.1],[68.0,307.1],[79.6,305.3],[289.4,306.7],[292.2,312.7],[52.2,323.5],[61.1,322.5],[68.4,323.6],[282.9,321.2],[271.6,333.4],[18.3,341.6],[-11.5,350.7],[45.6,351.9],[264.8,347.6],[-25.6,357.3],[-17.6,360.6],[44.4,356.9],[254.2,360.3],[-2.2,367.9],[7.8,365.9],[246.9,365.2],[-2.4,375.7],[6.3,374.2],[26.2,377.3],[1.0,383.4],[7.9,384.2],[26.3,385.0],[239.4,384.3],[6.2,394.7],[15.5,394.4],[228.7,395.5],[220.1,403.1],[218.8,411.6],[210.0,421.3],[-238.6,427.6],[201.1,428.4],[194.5,445.2],[185.6,456.2],[174.0,465.0],[-275.8,471.7],[176.2,472.0],[168.7,481.9],[-265.9,492.3],[156.1,491.8]];
         (function () {
-          ARBOLES_BORDE = ARBOLES_BORDE.filter(function (q) { return !enPoli(q[0] * escala, q[1] * escala, POLI_AGUA); });   // ningun arbol dentro del agua
+          ARBOLES_BORDE = ARBOLES_BORDE.filter(function (q) { return !enPoli(q[0] * escala, q[1] * escala, POLI_AGUA) && holguraCalle(q[0] * escala, q[1] * escala) > 2.4 * escala; });   // ni en el agua ni sobre/junto a una calle   // ningun arbol dentro del agua
           var n = ARBOLES_BORDE.length; if (!n) return;
           var geoTronco = new THREE.CylinderGeometry(0.2 * escala, 0.25 * escala, 2.2 * escala, 5); geoTronco.translate(0, 1.1 * escala, 0);
           var geoCopa = new THREE.ConeGeometry(1.7 * escala, 5.2 * escala, 6); geoCopa.translate(0, 4.4 * escala, 0);
@@ -1442,7 +1592,7 @@
             intentos++;
             var ang = azar() * Math.PI * 2, rad = Math.sqrt(azar()) * 26 * escala;
             var ax2 = qh.x + Math.cos(ang) * rad, az2 = qh.y + Math.sin(ang) * rad;
-            if (distACalle(ax2, az2) < anchoCalle / 2 + 1.5 * escala) continue;
+            if (holguraCalle(ax2, az2) < 2.4 * escala) continue;
             if (colisionesEdificios.some(function (c) { return Math.hypot(ax2 - c.x, az2 - c.z) < c.radio + 1.5 * escala; })) continue;
             if (arboles.some(function (a) { return Math.hypot(ax2 - a.x, az2 - a.z) < 3.5 * escala; })) continue;
             arboles.push({ x: ax2, z: az2 });
@@ -1512,10 +1662,18 @@
         function ubicarVisitante() {
           var cam = document.querySelector('[camera]');
           if (!cam || !camaraInicio) return;
-          cam.object3D.position.copy(camaraInicio);
-          var yaw = Math.atan2(-(0 - camaraInicio.x), -(0 - camaraInicio.z));
-          cam.components['look-controls'].yawObject.rotation.y = yaw;
           self.camara = cam;
+          if (inicioSala && new URLSearchParams(location.search).get('inicio') !== 'calle') {
+            // parte dentro de la radio, mirando hacia ella; la luz general baja como al entrar por la puerta
+            cam.object3D.position.copy(inicioSala);
+            cam.components['look-controls'].yawObject.rotation.y = 0;
+            var amb0 = document.getElementById('luz-ambiente'), sol0 = document.getElementById('luz-sol');
+            if (amb0) amb0.setAttribute('light', 'intensity', 0.3);
+            if (sol0) sol0.setAttribute('light', 'intensity', 0);
+            return;
+          }
+          cam.object3D.position.copy(camaraInicio);
+          cam.components['look-controls'].yawObject.rotation.y = Math.atan2(-(0 - camaraInicio.x), -(0 - camaraInicio.z));
         }
         if (escena.hasLoaded) ubicarVisitante(); else escena.addEventListener('loaded', ubicarVisitante);
 
@@ -1533,7 +1691,7 @@
         var linea2 = distanciaEscena === null ? '' : '<br>Estas a ' + Math.round(distanciaEscena / esc) + ' m reales del gimnasio';
         this.hud.innerHTML = linea1 + linea2 +
           (ES_TACTIL
-            ? '<br>Joystick para caminar (⏩ = rápido) · arrastra el dedo o gira el teléfono para mirar · toca cassettes, puertas y basura'
+            ? '<br>Joystick para caminar (» = correr) · arrastra el dedo o gira el teléfono para mirar · toca cassettes, puertas y basura'
             : '<br>W A S D caminar · Shift correr · arrastrar el mouse para mirar · clic en cassettes, puertas y basura' +
               '<br>Otra escala: agregar <b>?escala=1</b> a la direccion') +
           '<br><small>Edificios: ' + this.nReal + ' reales (© colaboradores de OpenStreetMap) + ' + this.nRelleno + ' casas de relleno inventadas (<b>?relleno=no</b> las oculta)</small>';
@@ -1646,7 +1804,7 @@
   <!-- Controles tactiles (solo se ven en telefono/tablet): caminar mientras se mantienen presionados -->
   <div id="joy" aria-label="Joystick para caminar"><div id="joy-knob"></div></div>
   <div id="ctl-tactil">
-    <button class="ctl-btn" id="ctl-rapido" aria-label="Correr (activar o desactivar)">⏩</button>
+    <button class="ctl-btn" id="ctl-rapido" aria-label="Correr (activar o desactivar)" title="Correr">»</button>
   </div>
 
   <div id="aviso"></div>
@@ -1681,7 +1839,7 @@
        cursor="rayOrigin: mouse"        -> el mouse es el puntero que activa los objetos
        raycaster="objects: .clickable"  -> solo reaccionan los objetos con class="clickable"
        (la niebla la pone el componente norte-maps segun la escala) -->
-  <a-scene stats background="color: #ECECEC" cursor="rayOrigin: mouse" raycaster="objects: .clickable">
+  <a-scene stats background="color: #CFE3F2" cursor="rayOrigin: mouse" raycaster="objects: .clickable">
 
     <!-- ARCHIVOS QUE SE CARGAN (modelo 3D de la radio y los relatos en audio) -->
     <a-assets>
