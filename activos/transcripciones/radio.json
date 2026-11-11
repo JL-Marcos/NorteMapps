@@ -1,0 +1,35 @@
+{
+ "audio": "radio.mp3",
+ "modelo": "small",
+ "idioma": "es",
+ "probabilidad_idioma": 1,
+ "duracion_s": 44.0,
+ "estado": "REVISADO por José (corrección manual del borrador automático de Whisper)",
+ "segmentos": [
+  {
+   "inicio": 0.02,
+   "fin": 7.02,
+   "texto": "Hola, te encuentras en la radio comunitaria de la Norte Grande, llamada Sintonía Barrial."
+  },
+  {
+   "inicio": 7.02,
+   "fin": 10.02,
+   "texto": "Hola, yo soy el locutor de la Norte KIDS."
+  },
+  {
+   "inicio": 11.02,
+   "fin": 16.02,
+   "texto": "Acá decimos cosas, invitamos amigos, todo."
+  },
+  {
+   "inicio": 16.02,
+   "fin": 28.02,
+   "texto": "La radio los sirve para informarlos sobre noticias, comunicarlos y expresarnos."
+  },
+  {
+   "inicio": 28.02,
+   "fin": 39.02,
+   "texto": "Lo que nos gustaría que haya la radio es una radio de terror que se va a llamar \"historias paranormales de la Norte\"."
+  }
+ ]
+}
