@@ -851,45 +851,79 @@
         // 0,0 = esquina superior izquierda de la foto real), para que el fragmento aparezca
         // en la sala EXACTAMENTE donde esta ese icono en el mural fisico.
         var FRAGMENTOS_UV = {
-          // Posiciones (u, v) corregidas con la imagen "movimiento puntos.png" de Jose (circulos amarillos = donde deben quedar los puntitos):
-          // se midieron en pixeles los 9 centros y se convirtio a u,v del mural. Antes quedaban ~0,13 del alto del mural mas abajo.
-          gimnasio: [0.461, 0.434], radio: [0.419, 0.396], cecof: [0.429, 0.447],
-          huerta: [0.379, 0.385], 'perritos-a': [0.368, 0.542], 'perritos-b': [0.569, 0.510],
-          'comida-rapida': [0.593, 0.607], cancha: [0.628, 0.552], locomocion: [0.739, 0.489]
+          // Centros de los iconos medidos sobre la foto del mural. (Una "correccion" anterior con la imagen de Jose uso una referencia
+          // sesgada y los subio ~0,13 del alto; se volvio a estos valores y se agrego el ajuste manual AJUSTE_PUNTITOS, mas abajo.)
+          gimnasio: [0.459, 0.568], radio: [0.415, 0.534], cecof: [0.421, 0.579],
+          huerta: [0.376, 0.514], 'perritos-a': [0.370, 0.656], 'perritos-b': [0.567, 0.651],
+          'comida-rapida': [0.591, 0.733], cancha: [0.629, 0.683], locomocion: [0.747, 0.616]
         };
+        // ===== CALIBRACION MANUAL DE LOS PUNTITOS DEL MURAL =====
+        // dx, dy = desplazamiento de TODOS los puntitos como fraccion del ancho / alto del mural.
+        //   dy > 0  -> los puntitos BAJAN ;  dy < 0 -> suben ;  dx > 0 -> a la derecha.   (0,01 = 1 % del mural, unos 5 cm en la sala)
+        // Se puede probar SIN editar el codigo:
+        //   - con la direccion:  ...index.html?pdx=0.01&pdy=-0.02
+        //   - dentro de la sala del gimnasio, con el teclado:  I = suben, K = bajan, J = izquierda, L = derecha  (Shift = pasos 5 veces mayores).
+        //     Cada pulsacion muestra los valores; cuando calce, copialos aqui abajo.
+        // Para mover UN solo punto, cambia su [u, v] en FRAGMENTOS_UV (arriba).
+        var AJUSTE_PUNTITOS = { dx: 0, dy: 0 };
+        (function () { var q = new URLSearchParams(location.search); AJUSTE_PUNTITOS.dx = parseFloat(q.get('pdx')) || AJUSTE_PUNTITOS.dx; AJUSTE_PUNTITOS.dy = parseFloat(q.get('pdy')) || AJUSTE_PUNTITOS.dy; })();
 
         // OJO ESCALA: "ancho"/"alto" llegan ya en metros reales (sin multiplicar por "escala").
         // Esta funcion los escala ella misma -- asi construirCaja(8,4,...) siempre significa
         // "8x4 metros reales", sea cual sea la escala elegida (antes quedaban fijos y
         // desproporcionados en relacion al barrio achicado: el bug que hacia "ver raro el mapa").
-        function construirCaja(anchoReal, altoReal, padre, centro) {
-          var ancho = anchoReal * escala, alto = altoReal * escala;
+        // Pone una textura (archivo en activos/texturas/) sobre una pieza. w,h = tamano (unidades de escena) de su cara grande; tileReal = metros
+        // reales que cubre una repeticion; emis > 0 la hace "autoiluminada" en esa proporcion (las salas son oscuras: sin esto un panel negro no se ve).
+        function texturar(el, url, tileReal, w, h, emis) {
+          function poner() {
+            var mesh = el.getObject3D('mesh'); if (!mesh) return;
+            new THREE.TextureLoader().load(url, function (t) {
+              t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(w / (tileReal * escala), h / (tileReal * escala));
+              if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+              mesh.material.map = t; mesh.material.color.set('#ffffff');
+              if (emis) { mesh.material.emissive.set('#ffffff'); mesh.material.emissiveMap = t; mesh.material.emissiveIntensity = emis; }
+              mesh.material.needsUpdate = true;
+            });
+          }
+          if (el.getObject3D('mesh')) poner(); else el.addEventListener('loaded', poner);
+        }
+
+        // OJO ESCALA: "ancho"/"alto"/"fondo" llegan ya en metros reales (sin multiplicar por "escala"). ancho = medida en x; fondo = medida en z
+        // (por defecto igual al ancho). La puerta va en el muro del frente (+z) y el fondo (-z) lleva el mural / la radio.
+        // opc = { fondoReal, pared: {url, tile, emis}, suelo: {url, tile, emis} }
+        function construirCaja(anchoReal, altoReal, padre, centro, opc) {
+          opc = opc || {};
+          var ancho = anchoReal * escala, fondo = (opc.fondoReal || anchoReal) * escala, alto = altoReal * escala;
           var grosor = 0.15 * escala;
           var pared = { color: '#EDE9DD', roughness: 1 };
-          crear('a-plane', { width: ancho, height: ancho, rotation: '-90 0 0', color: '#D8D2C2' }, padre);
-          crear('a-box', { width: ancho + grosor, height: alto, depth: grosor, position: '0 ' + (alto / 2) + ' ' + (-ancho / 2), color: pared.color }, padre);   // fondo
-          crear('a-box', { width: ancho + grosor, height: alto, depth: grosor, position: '0 ' + (alto / 2) + ' ' + (ancho / 2), color: pared.color }, padre);    // frente (con la puerta)
-          crear('a-box', { width: grosor, height: alto, depth: ancho, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre);
-          crear('a-box', { width: grosor, height: alto, depth: ancho, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre);
-          crear('a-plane', { width: ancho, height: ancho, rotation: '90 0 0', position: '0 ' + alto + ' 0', color: '#E4DFD0' }, padre);   // techo: la sala queda cerrada
+          var suelo = crear('a-plane', { width: ancho, height: fondo, rotation: '-90 0 0', color: '#D8D2C2' }, padre);
+          var muros = [
+            crear('a-box', { width: ancho + grosor, height: alto, depth: grosor, position: '0 ' + (alto / 2) + ' ' + (-fondo / 2), color: pared.color }, padre),   // fondo
+            crear('a-box', { width: ancho + grosor, height: alto, depth: grosor, position: '0 ' + (alto / 2) + ' ' + (fondo / 2), color: pared.color }, padre),    // frente (con la puerta)
+            crear('a-box', { width: grosor, height: alto, depth: fondo, position: (-ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre),
+            crear('a-box', { width: grosor, height: alto, depth: fondo, position: (ancho / 2) + ' ' + (alto / 2) + ' 0', color: pared.color }, padre)
+          ];
+          crear('a-plane', { width: ancho, height: fondo, rotation: '90 0 0', position: '0 ' + alto + ' 0', color: '#E4DFD0' }, padre);   // techo: la sala queda cerrada
+          if (opc.pared) muros.forEach(function (m, i) { texturar(m, opc.pared.url, opc.pared.tile, i < 2 ? ancho + grosor : fondo, alto, opc.pared.emis); });
+          if (opc.suelo) texturar(suelo, opc.suelo.url, opc.suelo.tile, ancho, fondo, opc.suelo.emis);
           // cartel SALIDA sobre la puerta (en el muro del frente, mirando hacia adentro)
           if (centro) {
-            var zc = ancho / 2 - grosor / 2 - 0.02 * escala;
+            var zc = fondo / 2 - grosor / 2 - 0.02 * escala;
             crear('a-box', { width: 2.2 * escala, height: 0.55 * escala, depth: 0.03 * escala, position: '0 ' + (2.55 * escala) + ' ' + zc, color: '#1E7A46' }, padre);
             crear('a-entity', { text: 'value: SALIDA; align: center; color: #FFFFFF; width: ' + (3.4 * escala) + '; font: mozillavr', position: '0 ' + (2.55 * escala) + ' ' + (zc - 0.02 * escala), rotation: '0 180 0' }, padre);
           }
           // la luz de cada sala es FOCAL (spot), la pone cada sala; ya no hay luz puntual central.
           // la camara se queda dentro de las paredes (margen mayor al plano cercano de la camara)
-          if (centro) salasColision.push({ x: centro.x, z: centro.z, half: ancho / 2 - grosor - 0.1, fuera: ancho * 1.5 });
+          if (centro) salasColision.push({ x: centro.x, z: centro.z, hx: ancho / 2 - grosor - 0.1, hz: fondo / 2 - grosor - 0.1, fuera: Math.max(ancho, fondo) * 1.5 });
           // se devuelve tambien "grosor": cualquier cosa que se cuelgue de una pared (mural,
           // pantalla, rack) tiene que quedar DELANTE de ella, no en su linea central -- si no,
           // queda dentro del espesor de la pared y la tapa el propio muro (invisible).
-          return { ancho: ancho, alto: alto, grosor: grosor };
+          return { ancho: ancho, fondo: fondo, alto: alto, grosor: grosor };
         }
 
         function construirSalaCecof(salida, radioData) {
           var sala = crear('a-entity', { position: SALA_CECOF.x + ' ' + SALA_CECOF.y + ' ' + SALA_CECOF.z });
-          var dim = construirCaja(8, 4, sala, SALA_CECOF);   // 8x4 METROS REALES -- construirCaja aplica la escala
+          var dim = construirCaja(8, 4, sala, SALA_CECOF, { pared: { url: 'activos/texturas/panel.jpg', tile: 1.6, emis: 0.45 } });   // 8x4 METROS REALES; muros de panel acustico
 
           // La radio: es el APARATO, no un cassette para recolectar. Su propio relato
           // esta siempre disponible. Un clic con las manos vacias lo reproduce/pausa;
@@ -942,20 +976,27 @@
           crear('a-entity', { light: 'type: spot; color: #FFF1D6; intensity: 2.2; angle: 28; penumbra: 0.5; decay: 1; distance: ' + (10 * escala) + '; target: #objetivo-tut', position: (1.2 * escala) + ' ' + (3.7 * escala) + ' ' + (-0.5 * escala) }, sala);
           window.addEventListener('norte-maps:tutorial', function () { tutTexto.setAttribute('text', 'value', TUT_TEXTO[tutEstado()]); });
 
-          // El rack: EN LA PARED izquierda (no sobre una mesa), un cassette "ranura" por
-          // cada relato que se encuentra afuera (todos menos la radio), con su nombre
-          // debajo en letra chica. Gris y bloqueado hasta depositarlo; celeste y
-          // clickeable despues -- clic para reproducir (pausa cualquier otro audio).
+          // La REPISA (activos/texturas/repisa.png, con transparencia) cuelga de la pared izquierda y los relatos van DENTRO de sus dos
+          // huecos: un cassette por cada relato que se encuentra afuera (todos menos la radio), con su nombre debajo. Gris y bloqueado hasta
+          // depositarlo; celeste y clickeable despues -- clic para reproducir (pausa cualquier otro audio).
+          // Medidas de los huecos sobre la imagen (fracciones del marco): ancho 0,085-0,912 ; hueco alto 0,109-0,464 ; hueco bajo 0,544-0,868.
           var otrosFragmentos = datos.puntos.filter(function (p) { return p.fragmento && p.fragmento !== 'radio'; });
           var xPared = -dim.ancho / 2 + dim.grosor + 0.02 * escala;      // DELANTE de la pared izquierda (no dentro)
-          var zBase = -1.3 * escala, pasoZ = 0.9 * escala, pasoY = -0.7 * escala, yBase = dim.alto * 0.62;
+          var repW = 4.4 * escala, repH = repW / 1.599, repY = 2.05 * escala, repZ = 0.05 * escala;
+          crear('a-plane', {
+            width: repW, height: repH, position: xPared + ' ' + repY + ' ' + repZ, rotation: '0 90 0',
+            material: 'src: #tex-repisa; transparent: true; alphaTest: 0.3; roughness: 1; metalness: 0; emissive: #ffffff; emissiveIntensity: 0.18'
+          }, sala);
+          var HUECOS_Y = [0.2865, 0.706];   // centro de cada hueco (fraccion desde arriba)
           otrosFragmentos.forEach(function (p, i) {
             var col = i % 4, fila = Math.floor(i / 4);
-            var z = zBase + col * pasoZ, y = yBase + fila * pasoY;
-            var ranura = crear('a-entity', { position: xPared + ' ' + y + ' ' + z, rotation: '0 90 0' }, sala);
+            var f = 0.085 + 0.827 * (col + 0.5) / 4;                              // posicion horizontal (fraccion del marco, de izquierda a derecha de la imagen)
+            var z = repZ + (0.5 - f) * repW;                                       // en la pared izquierda la derecha de la imagen es -z
+            var y = repY + repH * (0.5 - HUECOS_Y[fila]) + 0.10 * escala;          // un poco sobre el centro del hueco; el nombre queda debajo
+            var ranura = crear('a-entity', { position: (xPared + 0.05 * escala) + ' ' + y + ' ' + z, rotation: '0 90 0', scale: '1.8 1.8 1.8' }, sala);
             var caja = crear('a-box', { width: 0.1 * escala, height: 0.16 * escala, depth: 0.03 * escala, color: '#6B6B66' }, ranura);
             crear('a-entity', {
-              text: 'value: ' + p.nombre + '; align: center; color: #555; width: ' + (1.6 * escala),
+              text: 'value: ' + p.nombre + '; align: center; color: #F2E6CF; width: ' + (1.0 * escala),
               position: '0 ' + (-0.13 * escala) + ' ' + (0.02 * escala)
             }, ranura);
             function refrescarRanura() {
@@ -979,16 +1020,16 @@
             window.addEventListener('norte-maps:recoleccion', refrescarRanura);
           });
 
-          // LUCES FOCALES del CECOF: una sobre la radio y otra sobre la pared del rack.
+          // LUCES FOCALES del CECOF: una sobre la radio y otra sobre la repisa.
           crear('a-entity', { id: 'objetivo-radio', position: '0 ' + (1 * escala) + ' ' + (-1 * escala) }, sala);
           crear('a-entity', {
             light: 'type: spot; color: #FFE2B0; intensity: 2.5; angle: 24; penumbra: 0.5; decay: 1; distance: ' + (10 * escala) + '; target: #objetivo-radio',
             position: (1.4 * escala) + ' ' + (3.7 * escala) + ' ' + (1.3 * escala)
           }, sala);
-          crear('a-entity', { id: 'objetivo-rack', position: xPared + ' ' + (yBase - 0.35 * escala) + ' ' + (zBase + 1.5 * pasoZ) }, sala);
+          crear('a-entity', { id: 'objetivo-rack', position: xPared + ' ' + repY + ' ' + repZ }, sala);
           crear('a-entity', {
-            light: 'type: spot; color: #FFFFFF; intensity: 2.2; angle: 30; penumbra: 0.5; decay: 1; distance: ' + (10 * escala) + '; target: #objetivo-rack',
-            position: (1.8 * escala) + ' ' + (3.7 * escala) + ' ' + (0.2 * escala)
+            light: 'type: spot; color: #FFFFFF; intensity: 2.4; angle: 70; penumbra: 0.5; decay: 1; distance: ' + (10 * escala) + '; target: #objetivo-rack',
+            position: (2.2 * escala) + ' ' + (3.6 * escala) + ' ' + repZ
           }, sala);
 
           // La puerta va pegada al muro del frente, por dentro. Al volver afuera, la altura de ojo
@@ -999,27 +1040,49 @@
 
         function construirSalaGimnasio(salida) {
           var sala = crear('a-entity', { position: SALA_GIMNASIO.x + ' ' + SALA_GIMNASIO.y + ' ' + SALA_GIMNASIO.z });
-          var dim = construirCaja(9, 5, sala, SALA_GIMNASIO);   // 9x5 METROS REALES -- construirCaja aplica la escala
-          // OJO: con el ancho real de la foto (1600x1066 px), un mural de 8 m de ancho da
-          // 5.33 m de alto -- MAS ALTO que el techo de 5 m de esta sala (quedaba cortado
-          // contra el techo). 6 m de ancho da 4 m de alto, con margen de sobra.
+          // La sala tiene el tamano del volumen exterior del gimnasio (VOLUMENES.gimnasio): 22,1 m de ancho (x) por 30,3 m de fondo (z; la puerta
+          // esta en el extremo +z, como la puerta exterior esta en el extremo del largo), 6 m de alto. Paredes y suelo con textura (activos/texturas/).
+          var vg = VOLUMENES.gimnasio;
+          var dim = construirCaja(vg.ancho, vg.alto, sala, SALA_GIMNASIO, {
+            fondoReal: vg.largo,
+            pared: { url: 'activos/texturas/pared-gimnasio.jpg', tile: 3, emis: 0.4 },
+            suelo: { url: 'activos/texturas/piso-gimnasio.jpg', tile: 3, emis: 0.3 }
+          });
+          // OJO: con el ancho real de la foto (1600x1066 px), un mural de 8 m de ancho da 5.33 m de alto (casi el techo de 6 m). Se mantiene en 6 m
+          // de ancho (4 m de alto), con margen de sobra.
           var murWreal = 6, murW = murWreal * escala, murH = murW * 1066 / 1600;
-          var zMural = -dim.ancho / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared de atras (no dentro)
+          var zMural = -dim.fondo / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared de atras (no dentro)
           crear('a-plane', {
             width: murW, height: murH, position: '0 ' + (murH / 2 + 0.3 * escala) + ' ' + zMural,
             material: 'src: #mural-completo; roughness: 1; metalness: 0'
           }, sala);
-          // PUNTITOS DE LUZ VERDE: uno bajo la posicion de cada fragmento del mural. Apagado (gris oscuro)
-          // hasta que ese cassette queda depositado en la radio; entonces se enciende verde.
+          // PUNTITOS DE LUZ VERDE: uno sobre el icono de cada fragmento del mural. Apagado (gris oscuro) hasta que ese cassette queda
+          // depositado en la radio; entonces se enciende verde. Su posicion = FRAGMENTOS_UV + AJUSTE_PUNTITOS (calibracion manual).
           var puntitos = {};
+          function posicionarPuntitos() {
+            Object.keys(puntitos).forEach(function (clave) {
+              var uv = FRAGMENTOS_UV[clave];
+              var x = (uv[0] + AJUSTE_PUNTITOS.dx - 0.5) * murW;
+              var y = (murH / 2 + 0.3 * escala) + (0.5 - (uv[1] + AJUSTE_PUNTITOS.dy)) * murH;
+              puntitos[clave].setAttribute('position', x + ' ' + y + ' ' + (zMural + 0.05 * escala));
+            });
+          }
           Object.keys(FRAGMENTOS_UV).forEach(function (clave) {
-            var uv = FRAGMENTOS_UV[clave];
-            var x = (uv[0] - 0.5) * murW;
-            var y = (murH / 2 + 0.3 * escala) + (0.5 - uv[1]) * murH;   // el punto queda EXACTAMENTE en (u, v): son los centros medidos en la imagen de Jose
-            puntitos[clave] = crear('a-sphere', {
-              radius: 0.055 * escala, 'segments-width': 10, 'segments-height': 8,
-              position: x + ' ' + y + ' ' + (zMural + 0.05 * escala)
-            }, sala);
+            puntitos[clave] = crear('a-sphere', { radius: 0.055 * escala, 'segments-width': 10, 'segments-height': 8 }, sala);
+          });
+          posicionarPuntitos();
+          // Calibracion con el teclado (solo dentro de esta sala): I/K = suben/bajan, J/L = izquierda/derecha; Shift = pasos 5 veces mayores.
+          window.addEventListener('keydown', function (e) {
+            var cam = document.querySelector('[camera]'); if (!cam || e.ctrlKey || e.altKey || e.metaKey) return;
+            var cp = cam.object3D.position;
+            if (Math.abs(cp.x - SALA_GIMNASIO.x) > dim.ancho / 2 || Math.abs(cp.z - SALA_GIMNASIO.z) > dim.fondo / 2) return;
+            var paso = e.shiftKey ? 0.025 : 0.005, k = e.key.toLowerCase();
+            if (k === 'i') AJUSTE_PUNTITOS.dy -= paso; else if (k === 'k') AJUSTE_PUNTITOS.dy += paso;
+            else if (k === 'j') AJUSTE_PUNTITOS.dx -= paso; else if (k === 'l') AJUSTE_PUNTITOS.dx += paso; else return;
+            AJUSTE_PUNTITOS.dx = Math.round(AJUSTE_PUNTITOS.dx * 1000) / 1000; AJUSTE_PUNTITOS.dy = Math.round(AJUSTE_PUNTITOS.dy * 1000) / 1000;
+            posicionarPuntitos();
+            mostrarAviso('Calibracion de puntitos: AJUSTE_PUNTITOS = { dx: ' + AJUSTE_PUNTITOS.dx + ', dy: ' + AJUSTE_PUNTITOS.dy + ' }  (copia estos valores en el codigo)');
+            console.log('AJUSTE_PUNTITOS', JSON.stringify(AJUSTE_PUNTITOS));
           });
           function refrescarPuntitos() {
             Object.keys(puntitos).forEach(function (clave) {
@@ -1031,23 +1094,31 @@
           refrescarPuntitos();
           window.addEventListener('norte-maps:recoleccion', refrescarPuntitos);
 
-          // LUZ FOCAL del gimnasio: un foco sobre el mural (la imagen queda iluminada).
+          // LUZ FOCAL del gimnasio: un foco sobre el mural (la imagen queda iluminada), desde el techo a 6 m de la pared.
           crear('a-entity', { id: 'objetivo-mural', position: '0 ' + (murH / 2 + 0.3 * escala) + ' ' + zMural }, sala);
           crear('a-entity', {
-            light: 'type: spot; color: #FFF1D6; intensity: 3; angle: 42; penumbra: 0.4; decay: 1; distance: ' + (12 * escala) + '; target: #objetivo-mural',
-            position: '0 ' + (dim.alto - 0.25 * escala) + ' ' + (0.5 * escala)
+            light: 'type: spot; color: #FFF1D6; intensity: 3; angle: 42; penumbra: 0.4; decay: 1; distance: ' + (16 * escala) + '; target: #objetivo-mural',
+            position: '0 ' + (dim.alto - 0.25 * escala) + ' ' + (zMural + 6 * escala)
           }, sala);
 
-          // El "cine": pantalla + proyector en la pared lateral izquierda. Queda
-          // bloqueada (gris, sin clic) hasta reunir los 9 relatos en el mural/rack;
-          // al completarse, se desbloquea y un clic reproduce el documental (antes
-          // esto era un boton flotante fuera de la escena -- ahora vive adentro, sin
-          // texto explicativo: el color apagado/encendido ya comunica el estado).
-          var xPared = -dim.ancho / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared lateral (no dentro)
+          // GRADAS simples en la pared izquierda (4 escalones, el mas alto contra el muro), centradas en zCine. La pantalla esta enfrente
+          // (pared derecha) y el proyector cuelga sobre las gradas (pared izquierda), apuntando a la pantalla.
+          var xPared = -dim.ancho / 2 + dim.grosor + 0.02 * escala;   // DELANTE de la pared izquierda (no dentro)
+          var xParedD = dim.ancho / 2 - dim.grosor - 0.02 * escala;   // DELANTE de la pared derecha
+          var zCine = 2 * escala;
+          for (var g = 0; g < 4; g++) {
+            var h = 0.4 * (4 - g) * escala;
+            var peldano = crear('a-box', { width: 0.8 * escala, height: h, depth: 8 * escala, position: (xPared + (0.4 + g * 0.8) * escala) + ' ' + (h / 2) + ' ' + zCine, color: '#B98B5A' }, sala);
+            texturar(peldano, 'activos/texturas/pared-gimnasio.jpg', 1.5, 0.8 * escala, 8 * escala, 0.25);
+          }
+          // PANTALLA enfrente de las gradas (pared derecha, mirando hacia ellas). Bloqueada (gris, sin clic) hasta reunir los 9 relatos; al
+          // completarse se desbloquea y un clic reproduce el documental.
           var pantalla = crear('a-plane', {
-            width: 2.6 * escala, height: 1.5 * escala, position: xPared + ' ' + (1.8 * escala) + ' ' + (dim.ancho * 0.3), rotation: '0 90 0', color: '#1A1A1A'
+            width: 4.2 * escala, height: 2.36 * escala, position: xParedD + ' ' + (2.4 * escala) + ' ' + zCine, rotation: '0 -90 0', color: '#1A1A1A'
           }, sala);
-          crear('a-box', { width: 0.3 * escala, height: 0.2 * escala, depth: 0.4 * escala, position: (-xPared) + ' ' + (2.6 * escala) + ' ' + (dim.ancho * 0.3), rotation: '0 90 0', color: '#444' }, sala);
+          // PROYECTOR colgado del techo sobre las gradas, con un tiron, mirando a la pantalla
+          crear('a-box', { width: 0.4 * escala, height: 0.22 * escala, depth: 0.32 * escala, position: (xPared + 1.4 * escala) + ' ' + (dim.alto - 0.7 * escala) + ' ' + zCine, rotation: '0 -90 0', color: '#444' }, sala);
+          crear('a-cylinder', { radius: 0.025 * escala, height: 0.6 * escala, position: (xPared + 1.4 * escala) + ' ' + (dim.alto - 0.3 * escala) + ' ' + zCine, color: '#222', 'segments-radial': 6, 'segments-height': 1 }, sala);
           function refrescarPantalla() {
             var listo = contarRecolectados() === TOTAL_FRAGMENTOS;
             pantalla.setAttribute('color', listo ? '#000' : '#1A1A1A');
@@ -1063,7 +1134,7 @@
           });
           window.addEventListener('norte-maps:recoleccion', refrescarPantalla);
 
-          var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.ancho / 2 - dim.grosor), color: '#8C6A46' }, sala);
+          var puerta = crear('a-box', { width: 1 * escala, height: 2 * escala, depth: 0.1 * escala, position: '0 ' + escala + ' ' + (dim.fondo / 2 - dim.grosor), color: '#8C6A46' }, sala);
           puerta.setAttribute('portal', 'destino: ' + salida.x + ' ' + (1.6 * escala) + ' ' + salida.z + '; mirara: ' + salida.mirX + ' ' + (1.6 * escala) + ' ' + salida.mirZ + '; interior: false');
         }
 
@@ -1131,7 +1202,8 @@
             var salida = { x: (vol.cx + d1 * vol.ux) * escala, z: (vol.cz + d1 * vol.uz) * escala,
                            mirX: (vol.cx + d0 * vol.ux) * escala, mirZ: (vol.cz + d0 * vol.uz) * escala };
             var sala = p.tipo === 'gimnasio' ? SALA_GIMNASIO : SALA_CECOF;
-            puertaExt.setAttribute('portal', 'destino: ' + sala.x + ' ' + (1.6 * escala) + ' ' + (sala.z + 3 * escala) + '; mirara: ' + sala.x + ' ' + (1.6 * escala) + ' ' + sala.z + '; interior: true');
+            var zEnt = p.tipo === 'gimnasio' ? 9 : 3, zMir = p.tipo === 'gimnasio' ? -12 : 0;   // el gimnasio es mas hondo: se entra 6 m dentro de la puerta, mirando al mural
+            puertaExt.setAttribute('portal', 'destino: ' + sala.x + ' ' + (1.6 * escala) + ' ' + (sala.z + zEnt * escala) + '; mirara: ' + sala.x + ' ' + (1.6 * escala) + ' ' + (sala.z + zMir * escala) + '; interior: true');
             if (p.tipo === 'gimnasio') construirSalaGimnasio(salida);
             else { construirSalaCecof(salida, radioData); inicioSala = new THREE.Vector3(SALA_CECOF.x, 1.6 * escala, SALA_CECOF.z + 2.4 * escala); }
           }
@@ -1875,8 +1947,8 @@
         var m = 0.6 * this.escala;   // margen alrededor de los volumenes
         (this.salas || []).forEach(function (s) {
           if (Math.abs(p.x - s.x) < s.fuera && Math.abs(p.z - s.z) < s.fuera) {
-            p.x = Math.max(s.x - s.half, Math.min(s.x + s.half, p.x));
-            p.z = Math.max(s.z - s.half, Math.min(s.z + s.half, p.z));
+            p.x = Math.max(s.x - s.hx, Math.min(s.x + s.hx, p.x));
+            p.z = Math.max(s.z - s.hz, Math.min(s.z + s.hz, p.z));
           }
         });
         (this.cajas || []).forEach(function (c) {
@@ -2067,6 +2139,7 @@
       <audio id="audio-huerta" src="activos/huerta.mp3" preload="auto"></audio>
       <!-- Foto real del mural pintado en el gimnasio (se muestra completa e iluminada en su sala). -->
       <img id="mural-completo" src="activos/mural/mural-completo.jpg">
+      <img id="tex-repisa" src="activos/texturas/repisa.png">
     </a-assets>
 
     <!-- EL BARRIO, a escala reducida (1:5) para que el recorrido completo sea comodo.
