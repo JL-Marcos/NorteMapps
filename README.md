@@ -94,6 +94,7 @@ Quién probó: «PC» lo probó el asistente en un navegador controlado por él,
 ### Sonido con audífonos
 - Resultado: con audífonos en el computador, el sonido de los objetos (golpe y campana) se oye del lado donde aparece el objeto. No comprobé si el volumen baja al alejarse.
 - Ajuste que hice: ninguno.
+- Hallazgo después de grabar el video: al recoger cassettes y basura se oye la campana pero no se percibe el golpe. Comprobé en la escena que el golpe se carga y se reproduce igual que la campana, así que el código funciona. El archivo `golpe.mp3` tiene casi toda su energía en graves (73 % bajo 150 Hz, medido con ffmpeg y análisis de frecuencias), por lo que podría perderse en parlantes pequeños; es una hipótesis, no está confirmada. Con audífonos en el computador sí se oye. Queda como pendiente (sección 7).
 
 ### Fluidez del recorrido
 - Resultado: en el PC la escena marca entre 40.000 y 51.500 triángulos y entre 88 y 433 llamadas de dibujo según el lugar; el gimnasio (50.122) y el CECOF (51.460) superan levemente el margen de 50.000 que me propuse. No medí fluidez (fps) ni en el PC ni en el teléfono. En el Huawei Y9s (Opera) el recorrido funciona, pero **dentro del gimnasio se pone un poco más lento**.
@@ -129,6 +130,7 @@ Quedaron fuera de esta entrega a propósito: son parte del proyecto, pero no de 
 
 - Subtítulos y transcripción de los otros 7 relatos (la herramienta ya existe en `herramientas/subtitulos/`).
 - Audio ambiental del barrio y sonido posicional de los relatos (hoy solo suenan posicionalmente el golpe y la campana).
+- Revisar el sonido del golpe (casi no se percibe en algunos equipos; su energía está en graves): probar con distintos parlantes y, si se confirma, usar una versión con más agudos, declarando el cambio porque el original es del profesor.
 - Interacciones menores con los lugares (por ejemplo, con la huerta) para darles más carácter.
 - Cierre o límite del mapa a lo jugable: en la prueba con un iPhone, el visitante salió del área construida y se fue muy lejos.
 - Mejorar la fluidez del gimnasio en teléfono (se pone más lento en un Huawei Y9s con Opera; el gimnasio y el CECOF superan levemente los 50.000 triángulos).
