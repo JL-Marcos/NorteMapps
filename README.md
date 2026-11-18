@@ -46,7 +46,7 @@ NorteMapps es una cartografía narrativa navegable de «La Norte Maps», proyect
 - **Cassette como unidad de relato**: se extrae con clics, se lleva en la mano, se escucha con el reproductor portátil y se guarda en la radio. El video (documental) solo se desbloquea al depositar los 9 relatos en la radio.
 - **Parte clave de mi proyecto (criterio A3): el origen, es decir, la radio y el tutorial que ocurre dentro de ella.** El visitante parte en la radio, donde están los relatos y donde el tutorial le muestra la mecánica (tomar el cassette, dejarlo en la radio, salir). Ahí la propuesta de emisión queda relativamente clara: al dejar un relato en la radio aparece la posibilidad de juntar los otros y ver qué sucede. Esa es la apuesta y la intención de la experiencia. Lo elegí porque en el origen se determina la misión y de ahí se abre el mundo abierto que he venido desarrollando; y el hecho de que los relatos estén distribuidos por el mapa es lo que genera la sensación de **explorar**.
 - **Gimnasio y CECOF** modelados como volúmenes con la forma medida sobre imágenes de referencia; puertas por fuera de la cara a la calle y salas cerradas, con el tamaño del volumen exterior (el gimnasio mide 22,1 × 30,3 m). Las alturas son estimadas.
-- **Luz, sonido y materiales** (apoyan «explorar»): luz focal sobre la radio, la repisa y el mural, para guiar la mirada; el golpe al tocar el cassette y la campana al depositarlo son sonidos posicionales; texturas de panel y de piso en las salas.
+- **Luz, sonido y materiales** (apoyan «explorar»): luz focal sobre la radio, la repisa y el mural, para guiar la mirada; el golpe al tocar el cassette y la campana al depositarlo son sonidos posicionales; texturas de panel y de piso en las salas, graficas simples como dialogo con el usuario específico.
 - **Los relatos acompañan al visitante (decisión)**: la idea original era que el visitante portara algo como una grabadora. Por eso los relatos no son posicionales: se escuchan desde el reproductor portátil que lleva consigo, o desde la radio y la repisa. El sonido posicional de los relatos y el audio ambiental los abordo en la próxima entrega.
 - **Texturas con Vizcom** para dar carácter a las salas sin aumentar el peso.
 - **Ambientación** (humedal con totora, vegetación del borde, casas de colores con ventanas, colectivos y un bus que circulan, autos estacionados, perritos, multicancha, carrito de comida rápida, almacén «El Narigón») para que el mapa no se sintiera vacío. Las posiciones se calibraron con los íconos del mapa referencial; varias son estimadas.
@@ -54,7 +54,7 @@ NorteMapps es una cartografía narrativa navegable de «La Norte Maps», proyect
 - **Pantalla completa de toda la página**, porque con la de A-Frame el video quedaba oculto.
 - **Cambios respecto de la Solemne 1**:
   - Prometí 2 a 4 unidades narrativas; el prototipo tiene 8 relatos más el documental y el videoclip.
-  - Prometí texto, imagen y audio; el texto alternativo se implementó como **subtítulos y transcripción**: generados con Whisper y **corregidos por mí, integrante de la Cooperativa**. Hoy solo el relato de la radio está revisado y subtitulado (botón CC).
+  - Prometí texto, imagen y audio; el texto alternativo se implementó como **subtítulos y transcripción**: generados con Whisper y **corregidos por mí**. Hoy solo el relato de la radio está revisado y subtitulado (botón CC).
   - Prometí computador como dispositivo principal; se agregó control táctil para teléfono.
   - El hito de «primera prueba de usuario» estaba comprometido para el 21-oct en la Solemne 1. Esa fecha se desplazó: las pruebas en teléfono se hicieron el 4 de noviembre y las del computador el 28 de octubre.
 
@@ -84,7 +84,7 @@ Quién probó: «PC» lo probó el asistente en un navegador controlado por él,
 | Depositar en la radio y encender el punto del mural | Probado | Funciona; los puntos calzan con los íconos |
 | Reproductor portátil (reproducir, pausar, siguiente) | Probado | Funciona: suena |
 | Botón CC y subtítulos de la radio | Probado: se ven en sus tiempos y se apagan | Funciona: se ven los subtítulos |
-| Repisa del CECOF: tocar un relato depositado | No probado | Funciona |
+| Repisa del CECOF: tocar un relato depositado | Probado | Funciona |
 | Misión de basura y contenedores | Probada en sesiones anteriores | Funciona |
 | Video en pantalla completa | Probado abriendo el modal en pantalla completa; no probado el clic sobre la pantalla del gimnasio | Funciona |
 
@@ -117,10 +117,10 @@ Quién probó: «PC» lo probó el asistente en un navegador controlado por él,
   - **La escala y la proporción**, decididas por la sensación de navegación que tenía al recorrer el mapa.
   - **La posición de las cosas en el mapa:** hubo un traspaso automático del mapa al código, pero situar algunas cosas fue una decisión humana.
   - **Decidir qué cambia en cada versión**, subiendo y construyendo de forma gradual, y aportar las imágenes de referencia.
-  - **Probar cada versión en el PC y en el teléfono**, porque se comportan distinto en los dos.
+  - **Probar cada versión en el PC y en el teléfono**, porque se comportan distinto en los dos sistemas.
   - **Corregir las transcripciones:** los subtítulos los generó Whisper y necesitan corrección manual; corregí a mano la primera (la de la radio).
   - **Decidir qué se publica y qué no**, es decir, cuándo se hace cada commit y push.
-- **Qué hizo la IA**: ver el primer punto de esta sección. El código lo escribió el agente a partir de mis indicaciones y mis decisiones.
+- **Qué hizo la IA**: El código lo escribió el agente a partir de mis indicaciones y mis decisiones.
 - **Poder explicar y modificar el proyecto en vivo**: el proyecto se hizo con un agente de código y es mucho más largo que los ejercicios de clase, que son puntuales y apuntan a situaciones muy concretas. Por eso `index.html` está lleno de comentarios que explican cada parte; ahí me apoyo para entender la extensión del código y para ubicar lo que quiero explicar o modificar.
 
 ## 7 · Pendientes para el examen
@@ -132,7 +132,6 @@ Quedaron fuera de esta entrega a propósito: son parte del proyecto, pero no de 
 - Interacciones menores con los lugares (por ejemplo, con la huerta) para darles más carácter.
 - Cierre o límite del mapa a lo jugable: en la prueba con un iPhone, el visitante salió del área construida y se fue muy lejos.
 - Mejorar la fluidez del gimnasio en teléfono (se pone más lento en un Huawei Y9s con Opera; el gimnasio y el CECOF superan levemente los 50.000 triángulos).
-- Reducir el peso de los audios (≈ 26 MB frente a los 5 MB que sugiere la guía de la Sesión 8).
 - Niebla progresiva con la recolección.
 - Texturas de suelo con mis fotos de calle.
-- Limpieza hecha: se quitaron del repo los archivos que la escena no usa (`silla.glb`, `relieve.png` y los 9 recortes del mural).
+
